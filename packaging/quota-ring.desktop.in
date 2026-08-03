@@ -1,8 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=Quota Ring
+GenericName=AI Usage Indicator
 Comment=Show remaining Codex, Kimi, and Claude Code usage in the top bar
 Exec=@EXEC_PATH@
-Icon=@ICON_PATH@
+Icon=io.github.cduerr.QuotaRing
 Terminal=false
-X-GNOME-Autostart-enabled=true
+Categories=Utility;
+Keywords=AI;LLM;Codex;Claude;Kimi;Usage;Quota;
+StartupNotify=false

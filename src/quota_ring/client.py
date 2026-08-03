@@ -16,6 +16,7 @@ import urllib.request
 from datetime import datetime
 from typing import Any, Callable
 
+from quota_ring import __version__
 from quota_ring.config import Config
 from quota_ring.models import ProviderStatus, UsageWindow
 
@@ -56,7 +57,7 @@ class CodexClient:
                         "clientInfo": {
                             "name": "llm-usage-indicator",
                             "title": "Quota Ring",
-                            "version": "0.2.0",
+                            "version": __version__,
                         }
                     },
                 },

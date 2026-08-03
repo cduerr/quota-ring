@@ -42,13 +42,22 @@ available:
 PYTHONPATH=src /usr/bin/python3 -m quota_ring.app
 ```
 
-Install for the current user and enable GNOME autostart:
+Install for the current user and enable desktop autostart:
 
 ```sh
 chmod +x scripts/install.sh
 ./scripts/install.sh
 ~/.local/bin/quota-ring
 ```
+
+Use `./scripts/install.sh --no-autostart` to install without launching at
+login. To uninstall while retaining settings and logs:
+
+```sh
+./scripts/uninstall.sh
+```
+
+Pass `--purge` to the uninstaller to remove settings and logs too.
 
 ## Settings
 

@@ -41,7 +41,7 @@ class QuotaRingIndicator:
         self._icon_light_phase = False
         self.icon_dir = Path(__file__).resolve().parent / "assets" / "icons"
         self.indicator = AyatanaAppIndicator3.Indicator.new(
-            "quota-ring",
+            "io.github.cduerr.QuotaRing",
             "quota-ring-unknown",
             AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )

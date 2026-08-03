@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Quota Ring
+Comment=Show AI coding-plan usage in the top bar
+Exec=@EXEC_PATH@
+Icon=io.github.cduerr.QuotaRing
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
