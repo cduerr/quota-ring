@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -70,7 +71,25 @@ class Config:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = asdict(self)
         payload.pop("path")
-        self.path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".config-", suffix=".tmp", dir=self.path.parent
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as config_file:
+                json.dump(payload, config_file, indent=2)
+                config_file.write("\n")
+                config_file.flush()
+                os.fsync(config_file.fileno())
+            os.replace(temporary_path, self.path)
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            temporary_path.unlink(missing_ok=True)
+            raise
 
 
 def _positive_int(value: object, default: int) -> int:

@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -25,6 +26,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(Config.load(path).poll_seconds, 120)
             self.assertEqual(Config.load(path).low_poll_seconds, 60)
             self.assertTrue(Config.load(path).kimi_enabled)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_low_usage_refresh_defaults_to_90_seconds(self):
         with tempfile.TemporaryDirectory() as directory:

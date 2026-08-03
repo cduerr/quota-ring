@@ -1,9 +1,11 @@
 import os
 import unittest
+from unittest.mock import MagicMock, patch
 
 from quota_ring.client import (
     CodexClient,
     _clean_terminal,
+    _available_loopback_port,
     _parse_claude_usage,
     _parse_kimi_response,
     _parse_kimi_usage,
@@ -82,3 +84,11 @@ class ClientTests(unittest.TestCase):
             _resolve_command("missing-kimi --flag", "/bin/sh"),
             ["/bin/sh", "--flag"],
         )
+
+    def test_kimi_uses_an_available_loopback_port(self):
+        listener = MagicMock()
+        listener.__enter__.return_value = listener
+        listener.getsockname.return_value = ("127.0.0.1", 43123)
+        with patch("quota_ring.client.socket.socket", return_value=listener):
+            self.assertEqual(_available_loopback_port(), 43123)
+        listener.bind.assert_called_once_with(("127.0.0.1", 0))

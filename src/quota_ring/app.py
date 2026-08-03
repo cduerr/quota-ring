@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import datetime
@@ -21,6 +22,10 @@ from quota_ring.models import (
     icon_name,
     refresh_interval,
 )
+from quota_ring.runtime import InstanceLock, configure_logging
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class QuotaRingIndicator:
@@ -92,6 +97,7 @@ class QuotaRingIndicator:
                 try:
                     statuses[key] = future.result()
                 except Exception as exc:
+                    LOGGER.warning("%s refresh failed: %s", name, exc)
                     statuses[key] = ProviderStatus(
                         key, name, unavailable_reason=_short_error(str(exc))
                     )
@@ -116,6 +122,8 @@ class QuotaRingIndicator:
         return False
 
     def _apply_error(self, message: str) -> bool:
+        LOGGER.error("Refresh failed: %s", message)
+        self._status = None
         self._error = message
         self._last_checked = datetime.now().astimezone()
         self._refreshing = False
@@ -293,6 +301,11 @@ def _short_error(message: str) -> str:
 
 
 def main() -> None:
+    log_path = configure_logging()
+    instance_lock = InstanceLock()
+    if not instance_lock.acquire():
+        print("quota-ring: already running", file=sys.stderr)
+        return
     try:
         initialized, _argv = Gtk.init_check()
         if not initialized:
@@ -301,8 +314,12 @@ def main() -> None:
             )
         QuotaRingIndicator(Config.load()).run()
     except (RuntimeError, ValueError) as exc:
+        LOGGER.exception("Quota Ring could not start")
         print(f"quota-ring: {exc}", file=sys.stderr)
+        print(f"See {log_path} for details.", file=sys.stderr)
         raise SystemExit(1) from exc
+    finally:
+        instance_lock.release()
 
 
 if __name__ == "__main__":

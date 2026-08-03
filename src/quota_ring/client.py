@@ -7,6 +7,7 @@ import re
 import selectors
 import shlex
 import shutil
+import socket
 import subprocess
 import termios
 import time
@@ -24,6 +25,7 @@ class CodexClient:
         self.config = config
 
     def fetch(self) -> ProviderStatus:
+        port = _available_loopback_port()
         command = [
             *_resolve_command(
                 self.config.codex_command, os.path.expanduser("~/.local/bin/codex")
@@ -126,7 +128,7 @@ class KimiClient:
             "web",
             "--no-open",
             "--port",
-            "58690",
+            str(port),
         ]
         master, slave = pty.openpty()
         termios.tcsetwinsize(slave, (24, 100))
@@ -395,6 +397,13 @@ def _stop_process(process: subprocess.Popen[Any]) -> None:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
         process.kill()
+        process.wait(timeout=2)
+
+
+def _available_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
 
 
 def _resolve_command(configured: str, fallback_path: str) -> list[str]:
