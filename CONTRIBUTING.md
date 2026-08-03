@@ -33,3 +33,6 @@ PYTHONPATH=src /usr/bin/python3 -m quota_ring.app
 Keep changes focused, add tests for behavioral changes, and update the README or
 changelog when user-visible behavior changes. Provider parsers should include a
 fixture representing the CLI output that motivated the change.
+
+Maintainers should follow [docs/RELEASING.md](docs/RELEASING.md) when preparing
+a release.
