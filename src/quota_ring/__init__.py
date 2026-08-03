@@ -1,0 +1,1 @@
+"""Quota Ring desktop indicator."""

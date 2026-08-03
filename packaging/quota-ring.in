@@ -1,0 +1,2 @@
+#!/bin/sh
+PYTHONPATH="@APP_DIR@" exec /usr/bin/python3 -m quota_ring.app "$@"
