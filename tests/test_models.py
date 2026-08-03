@@ -37,9 +37,7 @@ class UsageStatusTests(unittest.TestCase):
         status = ProviderStatus.codex_response(
             {
                 "rateLimits": {"primary": {"usedPercent": 1}},
-                "rateLimitsByLimitId": {
-                    "codex": {"primary": {"usedPercent": 70}}
-                },
+                "rateLimitsByLimitId": {"codex": {"primary": {"usedPercent": 70}}},
             }
         )
         self.assertEqual(status.remaining_percent, 30)

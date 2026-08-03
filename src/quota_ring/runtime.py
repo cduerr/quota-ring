@@ -8,9 +8,7 @@ from pathlib import Path
 
 
 def configure_logging() -> Path:
-    cache_home = Path(
-        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")
-    )
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     log_dir = cache_home / "quota-ring"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "quota-ring.log"
@@ -33,9 +31,7 @@ def configure_logging() -> Path:
 class InstanceLock:
     def __init__(self, path: Path | None = None):
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-        cache_home = Path(
-            os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")
-        )
+        cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
         self.path = path or (
             Path(runtime_dir) / "quota-ring.lock"
             if runtime_dir
@@ -47,10 +43,7 @@ class InstanceLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(
             self.path,
-            os.O_CREAT
-            | os.O_RDWR
-            | os.O_CLOEXEC
-            | getattr(os, "O_NOFOLLOW", 0),
+            os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
         try:

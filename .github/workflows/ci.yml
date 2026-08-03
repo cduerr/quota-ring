@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Run unit tests
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+      - name: Compile sources
+        run: python -m compileall -q src
+
+  quality:
+    name: Quality and packaging
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install validation tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build ruff
+          sudo apt-get update
+          sudo apt-get install --yes desktop-file-utils shellcheck
+      - name: Lint Python
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Check shell scripts
+        run: shellcheck scripts/*.sh packaging/quota-ring.in
+      - name: Validate desktop entries
+        run: |
+          sed 's|@EXEC_PATH@|/usr/bin/quota-ring|g' packaging/quota-ring.desktop.in > /tmp/io.github.cduerr.QuotaRing.desktop
+          sed 's|@EXEC_PATH@|/usr/bin/quota-ring|g' packaging/quota-ring-autostart.desktop.in > /tmp/io.github.cduerr.QuotaRing-autostart.desktop
+          desktop-file-validate /tmp/io.github.cduerr.QuotaRing.desktop
+          desktop-file-validate /tmp/io.github.cduerr.QuotaRing-autostart.desktop
+      - name: Build distributions
+        run: python -m build

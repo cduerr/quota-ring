@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 import sys
 import threading
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import datetime
@@ -10,10 +10,7 @@ from pathlib import Path
 
 import gi
 
-gi.require_version("Gtk", "3.0")
-gi.require_version("AyatanaAppIndicator3", "0.1")
-from gi.repository import AyatanaAppIndicator3, GLib, Gtk  # noqa: E402
-
+from quota_ring import __version__
 from quota_ring.client import ClaudeClient, CodexClient, KimiClient
 from quota_ring.config import Config
 from quota_ring.models import (
@@ -24,6 +21,9 @@ from quota_ring.models import (
 )
 from quota_ring.runtime import InstanceLock, configure_logging
 
+gi.require_version("Gtk", "3.0")
+gi.require_version("AyatanaAppIndicator3", "0.1")
+from gi.repository import AyatanaAppIndicator3, GLib, Gtk  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -179,18 +179,22 @@ class QuotaRingIndicator:
                 if provider.available:
                     menu.append(
                         _info_item(
-                            f"{provider.display_name} · {provider.remaining_percent}% remaining"
+                            f"{provider.display_name} · "
+                            f"{provider.remaining_percent}% remaining"
                         )
                     )
                     for window in provider.windows:
                         reset = ""
                         if window.reset_datetime:
-                            reset = window.reset_datetime.strftime(" · resets %a %-I:%M %p")
+                            reset = window.reset_datetime.strftime(
+                                " · resets %a %-I:%M %p"
+                            )
                         elif window.reset_text:
                             reset = f" · resets {window.reset_text}"
                         menu.append(
                             _info_item(
-                                f"  {window.name}: {window.remaining_percent}% remaining{reset}"
+                                f"  {window.name}: "
+                                f"{window.remaining_percent}% remaining{reset}"
                             )
                         )
                     if provider.plan_type:
@@ -207,7 +211,9 @@ class QuotaRingIndicator:
 
         menu.append(Gtk.SeparatorMenuItem())
         checked = (
-            self._last_checked.strftime("%-I:%M:%S %p") if self._last_checked else "Never"
+            self._last_checked.strftime("%-I:%M:%S %p")
+            if self._last_checked
+            else "Never"
         )
         menu.append(_info_item(f"Last checked: {checked}"))
         refresh_item = Gtk.MenuItem(label="Refresh")
@@ -218,6 +224,9 @@ class QuotaRingIndicator:
         settings_item = Gtk.MenuItem(label="Settings…")
         settings_item.connect("activate", self._show_settings)
         menu.append(settings_item)
+        about_item = Gtk.MenuItem(label="About Quota Ring")
+        about_item.connect("activate", self._show_about)
+        menu.append(about_item)
         menu.append(Gtk.SeparatorMenuItem())
         quit_item = Gtk.MenuItem(label="Quit")
         quit_item.connect("activate", lambda _item: Gtk.main_quit())
@@ -243,7 +252,8 @@ class QuotaRingIndicator:
             command = Gtk.Entry(text=value)
             command.set_sensitive(enabled)
             checkbox.connect(
-                "toggled", lambda button, entry=command: entry.set_sensitive(button.get_active())
+                "toggled",
+                lambda button, entry=command: entry.set_sensitive(button.get_active()),
             )
             grid.attach(checkbox, 0, row, 1, 1)
             grid.attach(command, 1, row, 1, 1)
@@ -257,7 +267,10 @@ class QuotaRingIndicator:
         grid.attach(Gtk.Label(label="Below 5% refresh (seconds)", xalign=0), 0, 4, 1, 1)
         grid.attach(low_poll, 1, 4, 1, 1)
         note = Gtk.Label(
-            label="Uses each CLI’s existing local login. Credentials are not copied or stored.",
+            label=(
+                "Uses each CLI’s existing local login. Credentials are not "
+                "copied or stored."
+            ),
             xalign=0,
             wrap=True,
         )
@@ -286,6 +299,19 @@ class QuotaRingIndicator:
                 self.refresh()
         dialog.destroy()
 
+    def _show_about(self, _item: Gtk.MenuItem) -> None:
+        dialog = Gtk.AboutDialog()
+        dialog.set_program_name("Quota Ring")
+        dialog.set_version(__version__)
+        dialog.set_comments("AI coding-plan usage at a glance")
+        dialog.set_website("https://github.com/cduerr/quota-ring")
+        dialog.set_website_label("Quota Ring on GitHub")
+        dialog.set_copyright("Copyright © 2026 Chris Duerr")
+        dialog.set_license_type(Gtk.License.MIT_X11)
+        dialog.set_transient_for(None)
+        dialog.run()
+        dialog.destroy()
+
 
 def _info_item(label: str, tooltip: str | None = None) -> Gtk.MenuItem:
     item = Gtk.MenuItem(label=label)
@@ -310,7 +336,8 @@ def main() -> None:
         initialized, _argv = Gtk.init_check()
         if not initialized:
             raise RuntimeError(
-                "Could not connect to the GNOME display. Start the indicator from the desktop session."
+                "Could not connect to the GNOME display. Start the indicator "
+                "from the desktop session."
             )
         QuotaRingIndicator(Config.load()).run()
     except (RuntimeError, ValueError) as exc:

@@ -3,8 +3,8 @@ import os
 import stat
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 from quota_ring.config import Config
 
@@ -39,8 +39,9 @@ class ConfigTests(unittest.TestCase):
             legacy = home / ".config" / "codex-usage-indicator" / "config.json"
             legacy.parent.mkdir(parents=True)
             legacy.write_text('{"poll_seconds": 120}\n')
-            with patch.dict(os.environ, {}, clear=True), patch(
-                "pathlib.Path.home", return_value=home
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch("pathlib.Path.home", return_value=home),
             ):
                 config = Config.load()
             self.assertEqual(config.poll_seconds, 120)

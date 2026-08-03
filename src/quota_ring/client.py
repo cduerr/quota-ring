@@ -8,13 +8,15 @@ import selectors
 import shlex
 import shutil
 import socket
+import struct
 import subprocess
 import termios
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from quota_ring import __version__
 from quota_ring.config import Config
@@ -26,7 +28,6 @@ class CodexClient:
         self.config = config
 
     def fetch(self) -> ProviderStatus:
-        port = _available_loopback_port()
         command = [
             *_resolve_command(
                 self.config.codex_command, os.path.expanduser("~/.local/bin/codex")
@@ -79,7 +80,9 @@ class CodexClient:
         process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
         process.stdin.flush()
 
-    def _response(self, process: subprocess.Popen[str], request_id: int) -> dict[str, Any]:
+    def _response(
+        self, process: subprocess.Popen[str], request_id: int
+    ) -> dict[str, Any]:
         if process.stdout is None:
             raise RuntimeError("Codex app server output is unavailable")
         selector = selectors.DefaultSelector()
@@ -101,7 +104,11 @@ class CodexClient:
                     continue
                 if "error" in message:
                     error = message["error"]
-                    detail = error.get("message", error) if isinstance(error, dict) else error
+                    detail = (
+                        error.get("message", error)
+                        if isinstance(error, dict)
+                        else error
+                    )
                     raise RuntimeError(f"Codex error: {detail}")
                 result = message.get("result")
                 if not isinstance(result, dict):
@@ -122,17 +129,10 @@ class KimiClient:
         self.config = config
 
     def fetch(self) -> ProviderStatus:
-        command = [
-            *_resolve_command(
-                self.config.kimi_command, os.path.expanduser("~/.kimi-code/bin/kimi")
-            ),
-            "web",
-            "--no-open",
-            "--port",
-            str(port),
-        ]
+        port = _available_loopback_port()
+        command = _kimi_command(self.config, port)
         master, slave = pty.openpty()
-        termios.tcsetwinsize(slave, (24, 100))
+        _set_terminal_size(slave, 24, 100)
         try:
             process = subprocess.Popen(
                 command,
@@ -231,7 +231,7 @@ def _query_tui(
     cwd: str | None = None,
 ) -> str:
     master, slave = pty.openpty()
-    termios.tcsetwinsize(slave, (36, 100))
+    _set_terminal_size(slave, 36, 100)
     environment = os.environ.copy()
     environment.update({"TERM": "xterm-256color", "NO_COLOR": "1"})
     try:
@@ -405,6 +405,32 @@ def _available_loopback_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
+
+
+def _kimi_command(config: Config, port: int) -> list[str]:
+    return [
+        *_resolve_command(
+            config.kimi_command, os.path.expanduser("~/.kimi-code/bin/kimi")
+        ),
+        "web",
+        "--no-open",
+        "--port",
+        str(port),
+    ]
+
+
+def _set_terminal_size(descriptor: int, rows: int, columns: int) -> None:
+    set_size = getattr(termios, "tcsetwinsize", None)
+    if set_size is not None:
+        set_size(descriptor, (rows, columns))
+        return
+    import fcntl
+
+    fcntl.ioctl(
+        descriptor,
+        termios.TIOCSWINSZ,
+        struct.pack("HHHH", rows, columns, 0, 0),
+    )
 
 
 def _resolve_command(configured: str, fallback_path: str) -> list[str]:

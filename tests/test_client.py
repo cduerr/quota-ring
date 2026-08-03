@@ -1,15 +1,18 @@
 import os
+import termios
 import unittest
 from unittest.mock import MagicMock, patch
 
 from quota_ring.client import (
     CodexClient,
-    _clean_terminal,
     _available_loopback_port,
+    _clean_terminal,
+    _kimi_command,
     _parse_claude_usage,
     _parse_kimi_response,
     _parse_kimi_usage,
     _resolve_command,
+    _set_terminal_size,
 )
 from quota_ring.config import Config
 
@@ -29,8 +32,7 @@ class FakeProcess:
 class ClientTests(unittest.TestCase):
     def test_response_ignores_notifications(self):
         process = FakeProcess(
-            '{"method":"notice","params":{}}\n'
-            '{"id":2,"result":{"rateLimits":{}}}\n'
+            '{"method":"notice","params":{}}\n{"id":2,"result":{"rateLimits":{}}}\n'
         )
         result = CodexClient(Config())._response(process, 2)  # type: ignore[arg-type]
         self.assertEqual(result, {"rateLimits": {}})
@@ -92,3 +94,22 @@ class ClientTests(unittest.TestCase):
         with patch("quota_ring.client.socket.socket", return_value=listener):
             self.assertEqual(_available_loopback_port(), 43123)
         listener.bind.assert_called_once_with(("127.0.0.1", 0))
+
+    def test_kimi_command_uses_selected_port(self):
+        self.assertEqual(
+            _kimi_command(Config(kimi_command="/bin/echo"), 43123),
+            ["/bin/echo", "web", "--no-open", "--port", "43123"],
+        )
+
+    def test_terminal_size_uses_native_python_api(self):
+        with patch("quota_ring.client.termios.tcsetwinsize", create=True) as set_size:
+            _set_terminal_size(7, 24, 100)
+        set_size.assert_called_once_with(7, (24, 100))
+
+    def test_terminal_size_falls_back_to_ioctl(self):
+        with (
+            patch("quota_ring.client.termios.tcsetwinsize", None, create=True),
+            patch("fcntl.ioctl") as ioctl,
+        ):
+            _set_terminal_size(7, 24, 100)
+        self.assertEqual(ioctl.call_args.args[:2], (7, termios.TIOCSWINSZ))

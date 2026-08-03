@@ -43,7 +43,7 @@ class ProviderStatus:
         return min(window.remaining_percent for window in self.windows)
 
     @classmethod
-    def codex_response(cls, response: dict[str, Any]) -> "ProviderStatus":
+    def codex_response(cls, response: dict[str, Any]) -> ProviderStatus:
         snapshots = response.get("rateLimitsByLimitId") or {}
         snapshot = snapshots.get("codex") if isinstance(snapshots, dict) else None
         if not isinstance(snapshot, dict):
