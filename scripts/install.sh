@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 bin_home=${XDG_BIN_HOME:-"$HOME/.local/bin"}
