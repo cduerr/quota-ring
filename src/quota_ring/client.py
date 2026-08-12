@@ -208,12 +208,11 @@ class ClaudeClient:
         output = _query_tui(
             command,
             ready=lambda text: "shortcuts" in text.lower(),
-            complete=lambda text: (
-                "Failed to load usage data" in text
-                or ("currentsession" in _compact_terminal(text) and "%" in text)
-            ),
-            timeout=max(20, self.config.request_timeout_seconds),
+            complete=lambda text: "Failed to load usage data" in text,
+            timeout=max(30, self.config.request_timeout_seconds),
             cwd=_claude_trusted_cwd(),
+            sample=_claude_sample,
+            settle_seconds=2.0,
         )
         windows = _parse_claude_usage(output)
         if not windows:
@@ -229,7 +228,17 @@ def _query_tui(
     complete: Callable[[str], bool],
     timeout: int,
     cwd: str | None = None,
+    sample: Callable[[str], object] | None = None,
+    settle_seconds: float = 0.0,
 ) -> str:
+    """Drive a CLI's TUI and return everything it printed.
+
+    ``ready`` says the TUI has booted, ``complete`` is a hard stop. When
+    ``sample`` is given, the read continues until the sampled value has held
+    steady for ``settle_seconds``: these TUIs paint a cached value first and
+    only then replace it with the freshly fetched one, so returning on the
+    first frame that parses would report stale numbers.
+    """
     master, slave = pty.openpty()
     _set_terminal_size(slave, 36, 100)
     environment = os.environ.copy()
@@ -251,6 +260,8 @@ def _query_tui(
     os.close(slave)
     raw = bytearray()
     sent_usage = False
+    last_sample: object = None
+    settled_since: float | None = None
     deadline = time.monotonic() + timeout
     try:
         while time.monotonic() < deadline:
@@ -264,10 +275,23 @@ def _query_tui(
                     break
                 raw.extend(chunk)
             text = _clean_terminal(raw.decode("utf-8", errors="replace"))
-            if not sent_usage and ready(text):
-                os.write(master, b"/usage\r")
-                sent_usage = True
-            elif sent_usage and complete(text):
+            if not sent_usage:
+                if ready(text):
+                    os.write(master, b"/usage\r")
+                    sent_usage = True
+                continue
+            if complete(text):
+                return text
+            if sample is None:
+                continue
+            current = sample(text)
+            if not current:
+                continue
+            now = time.monotonic()
+            if current != last_sample:
+                last_sample = current
+                settled_since = now
+            elif settled_since is not None and now - settled_since >= settle_seconds:
                 return text
         text = _clean_terminal(raw.decode("utf-8", errors="replace"))
         if not sent_usage:
@@ -280,24 +304,6 @@ def _query_tui(
             pass
         os.close(master)
         _stop_process(process)
-
-
-def _parse_kimi_usage(text: str) -> list[UsageWindow]:
-    windows: list[UsageWindow] = []
-    for name, pattern in (
-        ("Weekly", r"Weekly limit[^\n]*?(\d+)% used\s+resets in\s+([^\n│]+)"),
-        ("5-hour", r"5h limit[^\n]*?(\d+)% used\s+resets in\s+([^\n│]+)"),
-    ):
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            windows.append(
-                UsageWindow(
-                    name=name,
-                    used_percent=int(match.group(1)),
-                    reset_text=f"in {match.group(2).strip()}",
-                )
-            )
-    return windows
 
 
 def _parse_kimi_response(payload: dict[str, Any]) -> ProviderStatus:
@@ -335,29 +341,70 @@ def _parse_kimi_response(payload: dict[str, Any]) -> ProviderStatus:
 
 
 def _parse_claude_usage(text: str) -> list[UsageWindow]:
-    compact = _compact_terminal(_clean_terminal(text))
+    # The /usage screen puts the label, its bar and its reset line one under
+    # the other; older single-line layouts keep all three on the label line.
+    # Work line by line so the reset value keeps its spacing and casing.
+    lines = _clean_terminal(text).splitlines()
+    compact_lines = [_compact_terminal(line) for line in lines]
     windows: list[UsageWindow] = []
     for label, name in (
         ("currentsession", "5-hour"),
         ("currentweek(allmodels)", "Weekly"),
         ("currentweek(sonnetonly)", "Weekly Sonnet"),
     ):
-        position = compact.rfind(label)
-        if position < 0:
-            continue
-        section = compact[position : position + 500]
-        percent = re.search(r"(\d+)%", section)
-        if not percent:
-            continue
-        reset = re.search(r"resetsin([^\n│]+)", section, re.IGNORECASE)
-        windows.append(
-            UsageWindow(
-                name=name,
-                used_percent=int(percent.group(1)),
-                reset_text=f"in {reset.group(1).strip()}" if reset else None,
-            )
+        index = next(
+            (
+                position
+                for position in reversed(range(len(compact_lines)))
+                if label in compact_lines[position]
+            ),
+            None,
         )
+        if index is None:
+            continue
+        used: int | None = None
+        reset_text: str | None = None
+        for line, compact in zip(
+            lines[index : index + 4], compact_lines[index : index + 4], strict=True
+        ):
+            if used is None:
+                percent = re.search(r"(\d+)%", line)
+                if percent:
+                    used = int(percent.group(1))
+            if reset_text is None and "resets" in compact:
+                reset_text = _claude_reset_text(line)
+        if used is None:
+            continue
+        windows.append(UsageWindow(name=name, used_percent=used, reset_text=reset_text))
     return windows
+
+
+def _claude_sample(text: str) -> tuple[tuple[str, int], ...]:
+    """The usage figures currently visible, for settle detection."""
+    return tuple(
+        (window.name, window.used_percent) for window in _parse_claude_usage(text)
+    )
+
+
+def _claude_reset_text(line: str) -> str | None:
+    """Pull the reset value out of a `Resets …` line.
+
+    Claude reports an absolute time ("Resets 12:59am (America/Chicago)");
+    older builds reported a relative one ("resets in 2h"). Either way the
+    menu shows whatever Claude itself says.
+    """
+    match = re.search(r"resets\s*(.+)", line, re.IGNORECASE)
+    if not match:
+        return None
+    value = match.group(1).strip().strip("│|").strip()
+    # Claude spells out the timezone it rendered the time in, which is the
+    # local one the menu already shows everything else in.
+    value = re.sub(r"\s*\([^()]*\)\s*$", "", value)
+    # The TUI lays the line out with cursor moves rather than spaces, so the
+    # gaps are gone once the escape codes are stripped.
+    value = re.sub(r",(?=\S)", ", ", value)
+    value = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", value)
+    return value.strip() or None
 
 
 def _clean_terminal(text: str) -> str:

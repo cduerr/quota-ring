@@ -2,7 +2,7 @@
 Type=Application
 Name=Quota Ring
 GenericName=AI Usage Indicator
-Comment=Show remaining Codex, Kimi, and Claude Code usage in the top bar
+Comment=Show Codex, Kimi, and Claude Code quotas in the top bar
 Exec=@EXEC_PATH@
 Icon=io.github.cduerr.QuotaRing
 Terminal=false

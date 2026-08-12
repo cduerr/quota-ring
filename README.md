@@ -9,16 +9,19 @@ Kimi, and Claude Code through their existing local CLI logins.
 
 ## What it shows
 
-Quota Ring uses the most constrained active window from every available
-provider as its overall percentage:
+The indicator shows three concentric gauge rings — one per provider (Codex,
+Kimi, and Claude Code). Each ring fills with the remaining percentage of the
+provider's most constrained active window and shifts color as allowance drops:
 
 - Green above 40% remaining
 - Yellow at 26–40%
 - Orange at 16–25%
-- Red at 10–15%
-- A numbered ring at 6–9%
-- A large red percentage at 3–5%
-- A slow red-to-pale-orange pulse at 0–2%
+- Red at 3–15%
+- A slow red-to-pale pulse at 0–2%
+
+A disabled or unavailable provider keeps a faint empty ring. Open Settings to
+assign providers to the outer, middle, and inner rings with the arrow buttons
+on each provider row.
 
 Click the indicator to see each provider, every reported usage window, reset
 times, refresh state, and the last successful check. A failed or logged-out

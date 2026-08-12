@@ -10,6 +10,7 @@ APP_NAME = "quota-ring"
 LEGACY_APP_NAME = "codex-usage-indicator"
 DEFAULT_POLL_SECONDS = 300
 DEFAULT_LOW_POLL_SECONDS = 90
+PROVIDER_KEYS = ("codex", "kimi", "claude")
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class Config:
     codex_enabled: bool = True
     kimi_enabled: bool = True
     claude_enabled: bool = True
+    ring_order: tuple[str, ...] = PROVIDER_KEYS
     poll_seconds: int = DEFAULT_POLL_SECONDS
     low_poll_seconds: int = DEFAULT_LOW_POLL_SECONDS
     request_timeout_seconds: int = 15
@@ -52,6 +54,7 @@ class Config:
             codex_enabled=_boolean(values.get("codex_enabled"), True),
             kimi_enabled=_boolean(values.get("kimi_enabled"), True),
             claude_enabled=_boolean(values.get("claude_enabled"), True),
+            ring_order=_ring_order(values.get("ring_order")),
             poll_seconds=_positive_int(
                 values.get("poll_seconds"), DEFAULT_POLL_SECONDS
             ),
@@ -89,6 +92,13 @@ class Config:
                 pass
             temporary_path.unlink(missing_ok=True)
             raise
+
+
+def _ring_order(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return PROVIDER_KEYS
+    order = tuple(dict.fromkeys(key for key in value if key in PROVIDER_KEYS))
+    return order + tuple(key for key in PROVIDER_KEYS if key not in order)
 
 
 def _positive_int(value: object, default: int) -> int:

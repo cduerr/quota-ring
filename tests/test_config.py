@@ -33,6 +33,25 @@ class ConfigTests(unittest.TestCase):
             path = Path(directory) / "missing.json"
             self.assertEqual(Config.load(path).low_poll_seconds, 90)
 
+    def test_ring_order_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            Config(ring_order=("claude", "codex", "kimi"), path=path).save()
+            self.assertEqual(Config.load(path).ring_order, ("claude", "codex", "kimi"))
+
+    def test_ring_order_defaults_when_absent_or_invalid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            self.assertEqual(Config.load(path).ring_order, ("codex", "kimi", "claude"))
+            path.write_text('{"ring_order": "codex"}\n')
+            self.assertEqual(Config.load(path).ring_order, ("codex", "kimi", "claude"))
+
+    def test_ring_order_filters_unknown_and_appends_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text('{"ring_order": ["kimi", "bogus", "kimi"]}\n')
+            self.assertEqual(Config.load(path).ring_order, ("kimi", "codex", "claude"))
+
     def test_legacy_config_is_loaded_but_saves_to_quota_ring_path(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)

@@ -84,8 +84,33 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -f "$icons_dir" 2>/dev/null || true
 fi
 
+# Pick up the freshly installed code: a running indicator is still executing
+# the previous revision from memory.
+process_pattern='python3 -m quota_ring.app'
+restarted=false
+if pgrep -f "$process_pattern" >/dev/null 2>&1; then
+    pkill -f "$process_pattern" || true
+    # Wait for it to exit so it releases the single-instance lock before the
+    # replacement tries to take it.
+    attempt=0
+    while pgrep -f "$process_pattern" >/dev/null 2>&1 && [ "$attempt" -lt 50 ]; do
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+    if pgrep -f "$process_pattern" >/dev/null 2>&1; then
+        pkill -KILL -f "$process_pattern" || true
+        sleep 0.5
+    fi
+    ("$launcher" >/dev/null 2>&1 &)
+    restarted=true
+fi
+
 printf 'Installed Quota Ring.\n'
-printf 'Run it now with: %s\n' "$launcher"
+if [ "$restarted" = true ]; then
+    printf 'Restarted the running indicator on the new version.\n'
+else
+    printf 'Run it now with: %s\n' "$launcher"
+fi
 if [ "$autostart" = true ]; then
     printf 'It will start automatically at the next desktop login.\n'
 fi

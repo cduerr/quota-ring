@@ -10,7 +10,6 @@ from quota_ring.client import (
     _kimi_command,
     _parse_claude_usage,
     _parse_kimi_response,
-    _parse_kimi_usage,
     _resolve_command,
     _set_terminal_size,
 )
@@ -38,14 +37,6 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(result, {"rateLimits": {}})
         process.stdout.close()
 
-    def test_parse_kimi_usage(self):
-        windows = _parse_kimi_usage(
-            "Weekly limit ███░ 31% used resets in 1d 23h 40m\n"
-            "5h limit ░░░░ 0% used resets in 1h 40m\n"
-        )
-        self.assertEqual([window.remaining_percent for window in windows], [69, 100])
-        self.assertEqual(windows[0].reset_text, "in 1d 23h 40m")
-
     def test_parse_kimi_server_response(self):
         status = _parse_kimi_response(
             {
@@ -70,6 +61,47 @@ class ClientTests(unittest.TestCase):
             "Current week (all models) 72% used resets in 3d\n"
         )
         self.assertEqual([window.remaining_percent for window in windows], [88, 28])
+
+    def test_parse_claude_multiline_usage_keeps_absolute_reset(self):
+        # The layout Claude Code actually renders: label, bar, then an
+        # absolute reset time on its own line.
+        windows = _parse_claude_usage(
+            "Current session\n"
+            "███████████████▌ 55% used\n"
+            "Resets 12:59am (America/Chicago)\n"
+            "\n"
+            "Current week (all models)\n"
+            "█████████ 34% used\n"
+            "Resets Aug 14, 2:59pm (America/Chicago)\n"
+            "+50% weekly limits promo through Aug 19 · clau.de/cc-50-promo\n"
+        )
+        self.assertEqual([window.name for window in windows], ["5-hour", "Weekly"])
+        self.assertEqual([window.used_percent for window in windows], [55, 34])
+        self.assertEqual(
+            [window.reset_text for window in windows],
+            ["12:59am", "Aug 14, 2:59pm"],
+        )
+
+    def test_parse_claude_relative_reset_is_still_read(self):
+        windows = _parse_claude_usage("Current session 12% used resets in 2h\n")
+        self.assertEqual(windows[0].reset_text, "in 2h")
+
+    def test_parse_claude_reset_spacing_is_restored(self):
+        # Cursor moves, not spaces, separate the fields in the real TUI, so the
+        # gaps vanish with the escape codes.
+        windows = _parse_claude_usage(
+            "Current session\n67% used\nResets 1am\x1b[40G(America/Chicago)\n"
+            "Current week (all models)\n36% used\nResets Aug14,3pm(America/Chicago)\n"
+        )
+        self.assertEqual(
+            [window.reset_text for window in windows],
+            ["1am", "Aug 14, 3pm"],
+        )
+
+    def test_parse_claude_usage_without_reset_line(self):
+        windows = _parse_claude_usage("Current session\n███ 55% used\n")
+        self.assertEqual(windows[0].used_percent, 55)
+        self.assertIsNone(windows[0].reset_text)
 
     def test_parse_claude_cursor_positioned_usage(self):
         windows = _parse_claude_usage(
