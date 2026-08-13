@@ -1,6 +1,7 @@
 import os
 import termios
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from quota_ring.client import (
@@ -54,6 +55,33 @@ class ClientTests(unittest.TestCase):
         )
         self.assertEqual(status.remaining_percent, 69)
         self.assertEqual(status.windows[0].name, "Weekly")
+        # The payload's window length is what makes a start, and a pace,
+        # derivable rather than just a label.
+        self.assertEqual(status.windows[0].duration_minutes, 7 * 24 * 60)
+
+    def test_kimi_window_durations_cover_the_reported_units(self):
+        for duration, unit, minutes in (
+            (5, "hour", 300),
+            (30, "minutes", 30),
+            (2, "days", 2880),
+            (1, "week", 10080),
+            (3, "fortnight", None),
+            (0, "hour", None),
+        ):
+            status = _parse_kimi_response(
+                {
+                    "data": {
+                        "kind": "ok",
+                        "summary": {
+                            "window": {"duration": duration, "unit": unit},
+                            "used": 10,
+                            "limit": 100,
+                        },
+                        "limits": [],
+                    }
+                }
+            )
+            self.assertEqual(status.windows[0].duration_minutes, minutes)
 
     def test_parse_claude_usage(self):
         windows = _parse_claude_usage(
@@ -102,6 +130,40 @@ class ClientTests(unittest.TestCase):
         windows = _parse_claude_usage("Current session\n███ 55% used\n")
         self.assertEqual(windows[0].used_percent, 55)
         self.assertIsNone(windows[0].reset_text)
+        self.assertIsNone(windows[0].resets_at)
+        # No reset instant means no start, so no pace is claimed for it.
+        self.assertIsNone(windows[0].window_start)
+
+    def test_claude_printed_reset_becomes_a_usable_window(self):
+        # Claude prints its reset time instead of reporting one; resolving it
+        # is what gives the window a start and therefore a forecast.
+        now = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+        windows = _parse_claude_usage(
+            "Current session\n55% used\nResets 5pm\n"
+            "Current week (all models)\n34% used\nResets Aug 14, 3pm\n",
+            now,
+        )
+        self.assertEqual(
+            [window.duration_minutes for window in windows], [300, 10080]
+        )
+        session, weekly = windows
+        self.assertEqual(
+            session.reset_datetime, datetime(2026, 8, 12, 17, 0, tzinfo=timezone.utc)
+        )
+        self.assertEqual(
+            session.window_start, datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc)
+        )
+        self.assertEqual(
+            weekly.window_start, datetime(2026, 8, 7, 15, 0, tzinfo=timezone.utc)
+        )
+
+    def test_unparseable_claude_reset_leaves_the_window_unforecastable(self):
+        windows = _parse_claude_usage(
+            "Current session\n55% used\nResets whenever\n",
+            datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(windows[0].reset_text, "whenever")
+        self.assertIsNone(windows[0].resets_at)
 
     def test_parse_claude_cursor_positioned_usage(self):
         windows = _parse_claude_usage(

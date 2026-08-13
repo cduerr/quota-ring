@@ -4,6 +4,7 @@ set -eu
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 cache_home=${XDG_CACHE_HOME:-"$HOME/.cache"}
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
 bin_home=${XDG_BIN_HOME:-"$HOME/.local/bin"}
 purge=false
 
@@ -23,8 +24,9 @@ rm -f -- \
     "$data_home/icons/hicolor/symbolic/apps/io.github.cduerr.QuotaRing-symbolic.svg"
 
 if [ "$purge" = true ]; then
-    rm -rf -- "$config_home/quota-ring" "$cache_home/quota-ring"
-    printf 'Removed Quota Ring, settings, and logs.\n'
+    rm -rf -- "$config_home/quota-ring" "$cache_home/quota-ring" \
+        "$state_home/quota-ring"
+    printf 'Removed Quota Ring, settings, usage history, and logs.\n'
 else
-    printf 'Removed Quota Ring. Settings and logs were preserved.\n'
+    printf 'Removed Quota Ring. Settings, usage history, and logs were preserved.\n'
 fi

@@ -96,6 +96,22 @@ class UsageStatusTests(unittest.TestCase):
         self.assertIsNone(reset_description(expired, now))
         self.assertEqual(reset_description(relative, now), "in 2h")
 
+    def test_window_start_is_derived_from_the_reset_and_the_length(self):
+        reset = datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc)
+        window = UsageWindow(
+            "Weekly", 40, resets_at=int(reset.timestamp()), duration_minutes=10080
+        )
+        self.assertEqual(
+            window.window_start, datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
+        )
+
+    def test_window_start_needs_both_the_reset_and_the_length(self):
+        reset = int(datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc).timestamp())
+        no_duration = UsageWindow("Weekly", 40, resets_at=reset)
+        no_reset = UsageWindow("Weekly", 40, duration_minutes=10080)
+        self.assertIsNone(no_duration.window_start)
+        self.assertIsNone(no_reset.window_start)
+
     def test_reset_description_normalizes_provider_text(self):
         now = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
         self.assertEqual(

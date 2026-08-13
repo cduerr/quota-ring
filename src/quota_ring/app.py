@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,7 +15,9 @@ import gi
 from quota_ring import __version__
 from quota_ring.client import ClaudeClient, CodexClient, KimiClient
 from quota_ring.config import Config
+from quota_ring.history import HistoryStore
 from quota_ring.icons import prune_icons, rings_svg, write_icon
+from quota_ring.insights import InsightsWindow
 from quota_ring.models import (
     DashboardStatus,
     ProviderStatus,
@@ -47,6 +50,8 @@ class QuotaRingIndicator:
         self._icon_timer_id: int | None = None
         self._pulse_states: tuple[int | None, ...] | None = None
         self._icon_light_phase = False
+        self._insights: InsightsWindow | None = None
+        self.history = _open_history()
         self.icon_dir = Path(__file__).resolve().parent / "assets" / "icons"
         self.icon_cache_dir = Path(GLib.get_user_cache_dir()) / "quota-ring" / "icons"
         self.icon_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -88,6 +93,7 @@ class QuotaRingIndicator:
             return True
         self._refreshing = True
         self._rebuild_menu()
+        self._update_insights()
         threading.Thread(target=self._fetch_status, daemon=True).start()
         return True
 
@@ -134,8 +140,13 @@ class QuotaRingIndicator:
         )
         self._set_rings_icon(self._ring_states(status), description)
         self.indicator.set_title(description)
+        try:
+            self.history.record(status, self._last_checked)
+        except sqlite3.Error as exc:
+            LOGGER.warning("Could not record usage history: %s", exc)
         self._schedule_refresh()
         self._rebuild_menu()
+        self._update_insights()
         return False
 
     def _apply_error(self, message: str) -> bool:
@@ -148,6 +159,7 @@ class QuotaRingIndicator:
         self.indicator.set_icon_full("quota-ring-unknown", "LLM quota unavailable")
         self.indicator.set_title("LLM quota unavailable")
         self._rebuild_menu()
+        self._update_insights()
         return False
 
     def _ring_states(
@@ -188,6 +200,10 @@ class QuotaRingIndicator:
 
     def _rebuild_menu(self) -> None:
         menu = Gtk.Menu()
+        insights_item = Gtk.MenuItem(label="Insights…")
+        insights_item.connect("activate", self._show_insights)
+        menu.append(insights_item)
+        menu.append(Gtk.SeparatorMenuItem())
         if self._error and not self._status:
             menu.append(_info_item("Usage unavailable"))
             menu.append(_info_item(self._error, self._error))
@@ -233,6 +249,26 @@ class QuotaRingIndicator:
         menu.append(quit_item)
         menu.show_all()
         self.indicator.set_menu(menu)
+
+    def _show_insights(self, _item: Gtk.MenuItem) -> None:
+        if self._insights is not None:
+            self._insights.present()
+            return
+        window = InsightsWindow(self.history, self.refresh)
+        window.connect("destroy", self._on_insights_destroyed)
+        self._insights = window
+        self._update_insights()
+        window.show_all()
+
+    def _on_insights_destroyed(self, _window: Gtk.Window) -> None:
+        self._insights = None
+
+    def _update_insights(self) -> None:
+        if self._insights is None:
+            return
+        self._insights.update(
+            self._status, self._last_checked, self._refreshing, self._error
+        )
 
     def _show_settings(self, _item: Gtk.MenuItem) -> None:
         dialog = Gtk.Dialog(title="Quota Ring Settings")
@@ -400,6 +436,21 @@ def _provider_item(provider: ProviderStatus) -> Gtk.MenuItem:
     details.show_all()
     item.set_submenu(details)
     return item
+
+
+def _open_history() -> HistoryStore:
+    """Open the history database, degrading to memory rather than failing.
+
+    History is an enhancement; a read-only home directory or a corrupt file
+    should cost the session its charts, not its indicator.
+    """
+    try:
+        history = HistoryStore()
+        history.prune()
+        return history
+    except (OSError, sqlite3.Error) as exc:
+        LOGGER.warning("Usage history unavailable, keeping it in memory: %s", exc)
+        return HistoryStore(memory=True)
 
 
 def _short_error(message: str) -> str:

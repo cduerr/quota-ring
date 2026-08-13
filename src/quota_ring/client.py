@@ -20,7 +20,7 @@ from typing import Any
 
 from quota_ring import __version__
 from quota_ring.config import Config
-from quota_ring.models import ProviderStatus, UsageWindow
+from quota_ring.models import ProviderStatus, UsageWindow, resolve_reset_text
 
 
 class CodexClient:
@@ -333,6 +333,7 @@ def _parse_kimi_response(payload: dict[str, Any]) -> ProviderStatus:
                 name=name,
                 used_percent=round(used / limit * 100),
                 resets_at=_iso_timestamp(raw.get("reset_at")),
+                duration_minutes=_duration_minutes(duration, unit),
             )
         )
     if not windows:
@@ -340,17 +341,19 @@ def _parse_kimi_response(payload: dict[str, Any]) -> ProviderStatus:
     return ProviderStatus("kimi", "Kimi", windows=tuple(windows))
 
 
-def _parse_claude_usage(text: str) -> list[UsageWindow]:
+def _parse_claude_usage(
+    text: str, now: datetime | None = None
+) -> list[UsageWindow]:
     # The /usage screen puts the label, its bar and its reset line one under
     # the other; older single-line layouts keep all three on the label line.
     # Work line by line so the reset value keeps its spacing and casing.
     lines = _clean_terminal(text).splitlines()
     compact_lines = [_compact_terminal(line) for line in lines]
     windows: list[UsageWindow] = []
-    for label, name in (
-        ("currentsession", "5-hour"),
-        ("currentweek(allmodels)", "Weekly"),
-        ("currentweek(sonnetonly)", "Weekly Sonnet"),
+    for label, name, duration in (
+        ("currentsession", "5-hour", 5 * 60),
+        ("currentweek(allmodels)", "Weekly", 7 * 24 * 60),
+        ("currentweek(sonnetonly)", "Weekly Sonnet", 7 * 24 * 60),
     ):
         index = next(
             (
@@ -375,7 +378,19 @@ def _parse_claude_usage(text: str) -> list[UsageWindow]:
                 reset_text = _claude_reset_text(line)
         if used is None:
             continue
-        windows.append(UsageWindow(name=name, used_percent=used, reset_text=reset_text))
+        # Claude prints its reset time rather than reporting one, so resolving
+        # it here is what gives the window a derivable start and a pace.
+        windows.append(
+            UsageWindow(
+                name=name,
+                used_percent=used,
+                resets_at=(
+                    resolve_reset_text(reset_text, now) if reset_text else None
+                ),
+                duration_minutes=duration,
+                reset_text=reset_text,
+            )
+        )
     return windows
 
 
@@ -418,6 +433,16 @@ def _clean_terminal(text: str) -> str:
 
 def _compact_terminal(text: str) -> str:
     return re.sub(r"[ \t]", "", text).lower()
+
+
+_UNIT_MINUTES = {"minute": 1, "hour": 60, "day": 24 * 60, "week": 7 * 24 * 60}
+
+
+def _duration_minutes(duration: object, unit: object) -> int | None:
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        return None
+    minutes = _UNIT_MINUTES.get(str(unit).strip().lower().rstrip("s"))
+    return round(duration * minutes) if minutes else None
 
 
 def _duration_name(duration: object, unit: object) -> str:

@@ -27,6 +27,45 @@ Click the indicator to see each provider, every reported usage window, reset
 times, refresh state, and the last successful check. A failed or logged-out
 provider remains visible in the menu but does not lower the overall percentage.
 
+## Insights
+
+**Insights…** at the top of the menu opens a window that answers a different
+question than the rings: not how much is left, but whether it will last.
+
+Each provider reports how long a window runs and when it resets, so the window
+start is derivable, and with it the share of the allowance spent against the
+share of the window elapsed. That ratio is the pace. At 1.0 the allowance runs
+out exactly at the reset; above it, the reset arrives too late.
+
+The chart plots spend against elapsed time. The dashed diagonal is spending
+perfectly in step with the window, and a curve above it is on course to run
+dry early — the projection marks where. Percentages are whole numbers, so
+spending is a step function and is drawn as one rather than smoothed.
+
+The headline names the window that runs out *soonest*, which is not always the
+one with the least left: a session window burning hard can empty long before a
+weekly one sitting lower.
+
+Projections assume the current average rate simply continues. That reads high
+for anyone who works in bursts — a weekly window looks alarming on a Friday
+evening and recovers by Monday without anything changing. Treat it as "at this
+rate", not as a forecast.
+
+## Usage history
+
+The Insights window draws on a local history database:
+
+```text
+~/.local/state/quota-ring/history.db
+```
+
+Only the moments at which spend changed are stored, along with a per-window
+heartbeat so an idle stretch is distinguishable from the indicator not running.
+Readings older than 90 days are dropped. The file is created with user-only
+permissions and never leaves the machine; `./scripts/uninstall.sh --purge`
+removes it. Charts covering past windows fill in as the indicator runs, so a
+fresh install shows the current window only.
+
 ## Provider access
 
 Quota Ring never copies or stores provider credentials:

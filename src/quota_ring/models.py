@@ -24,6 +24,21 @@ class UsageWindow:
             return None
         return datetime.fromtimestamp(self.resets_at).astimezone()
 
+    @property
+    def window_start(self) -> datetime | None:
+        """When the current window instance began.
+
+        Providers report the reset instant and the window length but never the
+        start, so it is derived. Everything that reasons about pace needs it,
+        which is why each client now fills in ``duration_minutes``.
+        """
+        if self.duration_minutes is None:
+            return None
+        reset = self.reset_datetime
+        if reset is None:
+            return None
+        return reset - timedelta(minutes=self.duration_minutes)
+
 
 @dataclass(frozen=True)
 class ProviderStatus:
@@ -109,6 +124,17 @@ class DashboardStatus:
             if status.remaining_percent is not None
         ]
         return min(remaining) if remaining else None
+
+
+def resolve_reset_text(value: str, now: datetime | None = None) -> int | None:
+    """Turn a provider's printed reset time into a timestamp, if it parses.
+
+    Claude prints its reset time instead of reporting one, so this is how that
+    window gets a ``resets_at`` and, with it, a derivable start.
+    """
+    current = now or datetime.now().astimezone()
+    parsed = _parse_reset_text(value, current)
+    return int(parsed.timestamp()) if parsed is not None else None
 
 
 def reset_description(window: UsageWindow, now: datetime | None = None) -> str | None:
