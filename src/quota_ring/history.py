@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS series_state (
     last_seen INTEGER NOT NULL,
     PRIMARY KEY (provider, window_name)
 );
+CREATE TABLE IF NOT EXISTS codex_token_usage (
+    source_key TEXT PRIMARY KEY,
+    observed_at INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    cached_input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    quota_percent REAL
+);
+CREATE INDEX IF NOT EXISTS codex_token_usage_time
+    ON codex_token_usage (observed_at);
 """
 
 
@@ -92,6 +103,28 @@ class HistoryStore:
             self._connection = sqlite3.connect(self.path)
         self._connection.row_factory = sqlite3.Row
         self._connection.executescript(SCHEMA)
+        columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(codex_token_usage)")
+        }
+        if "quota_percent" not in columns:
+            self._connection.execute(
+                "ALTER TABLE codex_token_usage ADD COLUMN quota_percent REAL"
+            )
+        # A short-lived importer revision keyed legacy records by byte offset.
+        # Remove those rows when the same event already exists under its
+        # original line-number key.
+        self._connection.execute(
+            "DELETE FROM codex_token_usage AS candidate "
+            "WHERE candidate.source_key LIKE '%:offset-%' AND EXISTS ("
+            "SELECT 1 FROM codex_token_usage AS original "
+            "WHERE original.source_key != candidate.source_key "
+            "AND original.observed_at = candidate.observed_at "
+            "AND original.model = candidate.model "
+            "AND original.input_tokens = candidate.input_tokens "
+            "AND original.cached_input_tokens = candidate.cached_input_tokens "
+            "AND original.output_tokens = candidate.output_tokens)"
+        )
         self._connection.commit()
         # Usage history is a record of when its owner was working, so keep it
         # readable only by them.
@@ -179,6 +212,55 @@ class HistoryStore:
         key = self.current_instance_key(provider, window_name)
         return self.series(provider, window_name, key) if key else []
 
+    def sync_codex_tokens(
+        self, start: datetime, end: datetime, codex_home: Path | None = None
+    ) -> int:
+        """Backfill this interval from local Codex logs, ignoring known events."""
+        from quota_ring.codex_usage import read_token_usage
+
+        written = 0
+        for event in read_token_usage(start, end, codex_home):
+            cursor = self._connection.execute(
+                "INSERT OR IGNORE INTO codex_token_usage "
+                "(source_key, observed_at, model, input_tokens, "
+                "cached_input_tokens, output_tokens, quota_percent) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event.source_key,
+                    int(event.observed_at.timestamp()),
+                    event.model,
+                    event.input_tokens,
+                    event.cached_input_tokens,
+                    event.output_tokens,
+                    event.quota_percent,
+                ),
+            )
+            written += cursor.rowcount
+        self._connection.commit()
+        return written
+
+    def codex_tokens(self, start: datetime, end: datetime):
+        """Return locally recorded Codex token events in an interval."""
+        from quota_ring.codex_usage import TokenUsage
+
+        rows = self._connection.execute(
+            "SELECT * FROM codex_token_usage WHERE observed_at >= ? "
+            "AND observed_at <= ? ORDER BY observed_at",
+            (int(start.timestamp()), int(end.timestamp())),
+        ).fetchall()
+        return [
+            TokenUsage(
+                source_key=row["source_key"],
+                observed_at=datetime.fromtimestamp(row["observed_at"]).astimezone(),
+                model=row["model"],
+                input_tokens=row["input_tokens"],
+                cached_input_tokens=row["cached_input_tokens"],
+                output_tokens=row["output_tokens"],
+                quota_percent=row["quota_percent"],
+            )
+            for row in rows
+        ]
+
     def recent_instances(
         self, provider: str, window_name: str, limit: int = 12
     ) -> list[Instance]:
@@ -210,12 +292,16 @@ class HistoryStore:
         cursor = self._connection.execute(
             "DELETE FROM observation WHERE observed_at < ?", (cutoff,)
         )
+        self._connection.execute(
+            "DELETE FROM codex_token_usage WHERE observed_at < ?", (cutoff,)
+        )
         self._connection.commit()
         return cursor.rowcount
 
     def clear(self) -> None:
         self._connection.execute("DELETE FROM observation")
         self._connection.execute("DELETE FROM series_state")
+        self._connection.execute("DELETE FROM codex_token_usage")
         self._connection.commit()
 
     def _series_state(self, provider: str, window_name: str) -> sqlite3.Row | None:

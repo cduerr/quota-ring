@@ -46,6 +46,14 @@ The headline names the window that runs out *soonest*, which is not always the
 one with the least left: a session window burning hard can empty long before a
 weekly one sitting lower.
 
+The Codex weekly chart splits its observed spend into colors using per-model
+token records from the local Codex session logs. When repeated quota increases
+contain only one model, Quota Ring estimates relative model rates from those
+isolated steps. Until there is enough evidence, it uses weighted token share.
+The legend states which method is active. Quota increases with no matching
+local token activity remain gray; this can include work from another machine or
+cloud chat because OpenAI reports only the combined allowance.
+
 Projections assume the current average rate simply continues. That reads high
 for anyone who works in bursts — a weekly window looks alarming on a Friday
 evening and recovers by Monday without anything changing. Treat it as "at this

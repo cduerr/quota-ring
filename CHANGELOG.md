@@ -18,5 +18,12 @@ uses [Semantic Versioning](https://semver.org/).
   points at which spend changed, pruned after 90 days.
 - Window start times for Kimi and Claude Code, derived from the reported
   window length and reset time, which is what makes a pace calculable.
+- A stacked Codex weekly chart that backfills local per-model token usage and
+  estimates relative model rates from isolated quota increases.
+
+### Fixed
+
+- Include current usage from resumed Codex threads whose rollout files remain
+  under an older creation-date directory.
 
 [Unreleased]: https://github.com/cduerr/quota-ring/commits/main

@@ -16,6 +16,8 @@ from datetime import datetime
 import cairo
 import gi
 
+from quota_ring.attribution import Attribution, attribute_models
+from quota_ring.codex_usage import model_label
 from quota_ring.forecast import (
     EARLY,
     OVER,
@@ -38,6 +40,16 @@ from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 CHART_PADDING = (52, 16, 16, 34)  # left, right, top, bottom
 GRID_STEPS = (0, 25, 50, 75, 100)
+MODEL_COLORS = {
+    "gpt-6-astra": "#8b5cf6",
+    "gpt-5.6-sol": "#38bdf8",
+    "gpt-5.6-terra": "#22c55e",
+    "gpt-5.6-luna": "#f59e0b",
+    "codex-auto-review": "#ec4899",
+    "unknown": "#94a3b8",
+    "unattributed": "#6b7280",
+}
+MODEL_PALETTE = ("#8b5cf6", "#38bdf8", "#22c55e", "#f59e0b", "#ec4899")
 
 
 class InsightsWindow(Gtk.Window):
@@ -336,6 +348,10 @@ class _DetailPane(Gtk.Box):
         self.chart_caption = Gtk.Label(xalign=0)
         self.chart_caption.set_line_wrap(True)
         self.pack_start(self.chart_caption, False, False, 0)
+        self.model_legend = Gtk.Label(xalign=0)
+        self.model_legend.set_line_wrap(True)
+        self.model_legend.set_margin_top(4)
+        self.pack_start(self.model_legend, False, False, 0)
 
         self.strip_label = Gtk.Label(xalign=0)
         self.strip_label.set_margin_top(12)
@@ -362,7 +378,18 @@ class _DetailPane(Gtk.Box):
         observations = self.history.current_series(
             forecast.provider, forecast.window.name
         )
-        self.chart.set_forecast(forecast, observations)
+        attribution = None
+        if (
+            forecast.provider == "codex"
+            and forecast.window.name == "Weekly"
+            and forecast.start is not None
+            and forecast.reset is not None
+        ):
+            self.history.sync_codex_tokens(forecast.start, forecast.now)
+            tokens = self.history.codex_tokens(forecast.start, forecast.now)
+            attribution = attribute_models(observations, tokens, forecast.start)
+        self.chart.set_forecast(forecast, observations, attribution)
+        self._show_model_legend(attribution)
         legend = (
             "The dashed diagonal is spending exactly in step with the window. "
             "Staying above it means the allowance runs out before the reset. "
@@ -404,6 +431,37 @@ class _DetailPane(Gtk.Box):
         )
         self.strip.set_instances(completed)
 
+    def _show_model_legend(self, attribution: Attribution | None) -> None:
+        if attribution is None or not attribution.models:
+            self.model_legend.set_text("")
+            return
+        entries = []
+        for model in attribution.models:
+            color = _model_color(model)
+            label = (
+                "No matching local tokens"
+                if model == "unattributed"
+                else model_label(model)
+            )
+            entries.append(
+                f"<span background='{color}' foreground='{color}'>━━</span> "
+                f"{_escape(label)}"
+            )
+        if attribution.method == "observed rates":
+            method = (
+                f"Estimated rates from {attribution.isolated_steps} "
+                "single-model 1% steps"
+            )
+        else:
+            method = (
+                "Weighted token share · more isolated quota steps improve the estimate"
+            )
+        self.model_legend.set_markup(
+            "<span size='small'>"
+            + "   ".join(entries)
+            + f"</span><span size='small' alpha='55%'>  ·  {_escape(method)}</span>"
+        )
+
     def _fill_stats(self, forecast: Forecast) -> None:
         for child in self.stats.get_children():
             self.stats.remove(child)
@@ -444,11 +502,16 @@ class _BurnUpChart(Gtk.DrawingArea):
         super().__init__()
         self.forecast: Forecast | None = None
         self.points: list[tuple[float, float]] = []
+        self.attribution: Attribution | None = None
+        self.stack_points: list[tuple[float, dict[str, float]]] = []
         self.set_size_request(-1, 260)
         self.connect("draw", self._draw)
 
-    def set_forecast(self, forecast: Forecast, observations) -> None:
+    def set_forecast(
+        self, forecast: Forecast, observations, attribution: Attribution | None = None
+    ) -> None:
         self.forecast = forecast
+        self.attribution = attribution
         if forecast.start is not None and forecast.reset is not None:
             self.points = normalize_points(
                 [
@@ -458,8 +521,17 @@ class _BurnUpChart(Gtk.DrawingArea):
                 forecast.start,
                 forecast.reset,
             )
+            duration = (forecast.reset - forecast.start).total_seconds()
+            self.stack_points = [
+                (
+                    (point.observed_at - forecast.start).total_seconds() / duration,
+                    {model: value / 100 for model, value in point.layers.items()},
+                )
+                for point in (attribution.points if attribution else ())
+            ]
         else:
             self.points = []
+            self.stack_points = []
         self.queue_draw()
 
     def _draw(self, widget: Gtk.DrawingArea, cr: cairo.Context) -> bool:
@@ -518,7 +590,18 @@ class _BurnUpChart(Gtk.DrawingArea):
         state = icon_state(forecast.window.remaining_percent)
         color = _rgb(STATE_COLORS[state])
 
-        self._draw_curve(cr, forecast, px, py, color, fraction, used)
+        if self.stack_points and self.attribution is not None:
+            self._draw_model_stack(cr, px, py, fraction)
+        self._draw_curve(
+            cr,
+            forecast,
+            px,
+            py,
+            color,
+            fraction,
+            used,
+            fill=not self.stack_points,
+        )
         self._draw_projection(cr, forecast, px, py, color)
 
         cr.set_source_rgb(*color)
@@ -566,7 +649,40 @@ class _BurnUpChart(Gtk.DrawingArea):
             cr.move_to(x - width / 2, baseline)
             cr.show_text(label)
 
-    def _draw_curve(self, cr, forecast, px, py, color, fraction, used) -> None:
+    def _draw_model_stack(self, cr, px, py, fraction) -> None:
+        points = [point for point in self.stack_points if point[0] <= fraction + 1e-9]
+        if not points or self.attribution is None:
+            return
+        if points[-1][0] < fraction:
+            points.append((fraction, points[-1][1]))
+        # Adjacent translucent polygons otherwise leave pale antialias seams
+        # that look like missing quota between two model bands.
+        cr.set_antialias(cairo.ANTIALIAS_NONE)
+        for model_index, model in enumerate(self.attribution.models):
+            lower = []
+            upper = []
+            prior_models = self.attribution.models[:model_index]
+            for x, layers in points:
+                bottom = sum(layers.get(prior, 0.0) for prior in prior_models)
+                lower.append((x, bottom))
+                upper.append((x, bottom + layers.get(model, 0.0)))
+            cr.set_source_rgba(*_rgb(_model_color(model)), 0.42)
+            cr.move_to(px(lower[0][0]), py(lower[0][1]))
+            cr.line_to(px(upper[0][0]), py(upper[0][1]))
+            for index, (x, y) in enumerate(upper[1:], start=1):
+                cr.line_to(px(x), py(upper[index - 1][1]))
+                cr.line_to(px(x), py(y))
+            cr.line_to(px(lower[-1][0]), py(lower[-1][1]))
+            for index in range(len(lower) - 2, -1, -1):
+                cr.line_to(px(lower[index][0]), py(lower[index + 1][1]))
+                cr.line_to(px(lower[index][0]), py(lower[index][1]))
+            cr.close_path()
+            cr.fill()
+        cr.set_antialias(cairo.ANTIALIAS_DEFAULT)
+
+    def _draw_curve(
+        self, cr, forecast, px, py, color, fraction, used, fill=True
+    ) -> None:
         observed = [point for point in self.points if point[0] <= fraction + 1e-9]
         if len(observed) < 2:
             # One reading says nothing about the shape of the spend, and a step
@@ -584,15 +700,16 @@ class _BurnUpChart(Gtk.DrawingArea):
         curve = sorted([*observed, (fraction, used)], key=lambda point: point[0])
         # Spend is a step function, so draw it as steps rather than smoothing
         # between the readings the store happened to catch.
-        cr.set_source_rgba(*color, 0.12)
-        cr.move_to(px(curve[0][0]), py(0))
-        for index, (x, y) in enumerate(curve):
-            if index:
-                cr.line_to(px(x), py(curve[index - 1][1]))
-            cr.line_to(px(x), py(y))
-        cr.line_to(px(curve[-1][0]), py(0))
-        cr.close_path()
-        cr.fill()
+        if fill:
+            cr.set_source_rgba(*color, 0.12)
+            cr.move_to(px(curve[0][0]), py(0))
+            for index, (x, y) in enumerate(curve):
+                if index:
+                    cr.line_to(px(x), py(curve[index - 1][1]))
+                cr.line_to(px(x), py(y))
+            cr.line_to(px(curve[-1][0]), py(0))
+            cr.close_path()
+            cr.fill()
 
         cr.set_source_rgb(*color)
         cr.set_line_width(2.4)
@@ -795,6 +912,12 @@ def _rounded_rect(cr, x, y, width, height, radius) -> None:
 def _rgb(color: str) -> tuple[float, float, float]:
     value = color.lstrip("#")
     return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))  # type: ignore[return-value]
+
+
+def _model_color(model: str) -> str:
+    if model in MODEL_COLORS:
+        return MODEL_COLORS[model]
+    return MODEL_PALETTE[sum(model.encode("utf-8")) % len(MODEL_PALETTE)]
 
 
 def _foreground(widget: Gtk.Widget) -> tuple[float, float, float, float]:

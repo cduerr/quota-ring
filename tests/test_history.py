@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -101,6 +102,36 @@ class QueryTests(unittest.TestCase):
     def test_series_of_an_unknown_window_is_empty(self):
         self.assertEqual(self.history.current_series("kimi", "Weekly"), [])
         self.assertIsNone(self.history.last_seen("kimi", "Weekly"))
+
+    def test_codex_tokens_can_be_backfilled_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            session_dir = home / "sessions" / "2026" / "08" / "12"
+            session_dir.mkdir(parents=True)
+            context = {"type": "turn_context", "payload": {"model": "gpt-test"}}
+            event = {
+                "timestamp": "2026-08-12T12:05:00Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 100,
+                            "cached_input_tokens": 20,
+                            "output_tokens": 10,
+                        }
+                    },
+                },
+            }
+            (session_dir / "rollout.jsonl").write_text(
+                json.dumps(context) + "\n" + json.dumps(event) + "\n"
+            )
+            end = at(hours=1)
+            self.assertEqual(self.history.sync_codex_tokens(NOW, end, home), 1)
+            self.assertEqual(self.history.sync_codex_tokens(NOW, end, home), 0)
+            tokens = self.history.codex_tokens(NOW, end)
+        self.assertEqual(len(tokens), 1)
+        self.assertEqual(tokens[0].model, "gpt-test")
 
 
 class RetentionTests(unittest.TestCase):
