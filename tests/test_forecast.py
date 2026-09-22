@@ -1,5 +1,8 @@
+import os
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from quota_ring.forecast import (
     EARLY,
@@ -13,6 +16,7 @@ from quota_ring.forecast import (
     forecast_status,
     forecast_window,
     format_duration,
+    local_day_boundaries,
     normalize_points,
 )
 from quota_ring.models import DashboardStatus, ProviderStatus, UsageWindow
@@ -150,6 +154,25 @@ class NormalizeTests(unittest.TestCase):
 
     def test_zero_length_window_has_no_points(self):
         self.assertEqual(normalize_points([(NOW, 5)], NOW, NOW), [])
+
+
+class DayBoundaryTests(unittest.TestCase):
+    @unittest.skipUnless(hasattr(time, "tzset"), "requires local time zone support")
+    def test_midnights_follow_local_calendar_across_daylight_saving(self):
+        try:
+            with patch.dict(os.environ, {"TZ": "America/Chicago"}):
+                time.tzset()
+                start = datetime(2026, 10, 31, 12)
+                reset = datetime(2026, 11, 2, 12)
+                boundaries = local_day_boundaries(start, reset)
+                self.assertEqual(
+                    [at.strftime("%a") for _, at in boundaries], ["Sun", "Mon"]
+                )
+                self.assertAlmostEqual(boundaries[0][0], 12 / 49)
+                self.assertAlmostEqual(boundaries[1][0], 37 / 49)
+                self.assertEqual(local_day_boundaries(reset, reset), [])
+        finally:
+            time.tzset()
 
 
 class FormatDurationTests(unittest.TestCase):

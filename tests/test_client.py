@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from quota_ring.client import (
     CodexClient,
     _available_loopback_port,
+    _claude_ready,
     _clean_terminal,
     _kimi_command,
     _parse_claude_usage,
@@ -89,6 +90,18 @@ class ClientTests(unittest.TestCase):
             "Current week (all models) 72% used resets in 3d\n"
         )
         self.assertEqual([window.remaining_percent for window in windows], [88, 28])
+
+    def test_claude_ready_accepts_current_prompt(self):
+        current_screen = (
+            "Claude Code v2.1.232\n"
+            "Tips for getting started\n"
+            "\x1b[2C\x1b[3A❯\u00a0Try how do I log an error?\n"
+        )
+        self.assertTrue(_claude_ready(current_screen))
+
+    def test_claude_ready_keeps_older_startup_compatibility(self):
+        self.assertTrue(_claude_ready("Type /help for shortcuts\n"))
+        self.assertFalse(_claude_ready("Claude Code is starting\n"))
 
     def test_parse_claude_multiline_usage_keeps_absolute_reset(self):
         # The layout Claude Code actually renders: label, bar, then an

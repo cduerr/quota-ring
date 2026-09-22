@@ -12,7 +12,7 @@ Kept free of GTK imports so it can be tested without the desktop bindings.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from quota_ring.models import DashboardStatus, UsageWindow
 
@@ -207,6 +207,30 @@ def normalize_points(
         )
         for at, used in points
     ]
+
+
+def local_day_boundaries(
+    start: datetime, reset: datetime
+) -> list[tuple[float, datetime]]:
+    """Local midnights strictly inside a window, as elapsed fractions.
+
+    Construct each midnight from its calendar date so daylight saving changes
+    produce the right spacing on the time axis.
+    """
+    start_stamp = start.timestamp()
+    reset_stamp = reset.timestamp()
+    total = reset_stamp - start_stamp
+    if total <= 0:
+        return []
+    day = datetime.fromtimestamp(start_stamp).date() + timedelta(days=1)
+    last_day = datetime.fromtimestamp(reset_stamp).date()
+    boundaries = []
+    while day <= last_day:
+        stamp = datetime.combine(day, time.min).timestamp()
+        if start_stamp < stamp < reset_stamp:
+            boundaries.append((stamp - start_stamp, datetime.fromtimestamp(stamp)))
+        day += timedelta(days=1)
+    return [(elapsed / total, at) for elapsed, at in boundaries]
 
 
 def format_duration(delta: timedelta) -> str:

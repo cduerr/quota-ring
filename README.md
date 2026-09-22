@@ -107,6 +107,7 @@ cd quota-ring
 
 The installer adds an application-grid entry and enables desktop autostart. Use
 `./scripts/install.sh --no-autostart` to opt out of launch at login.
+Pass `--launch` to start the indicator as part of installation.
 
 To uninstall while retaining settings and diagnostics:
 

@@ -25,6 +25,7 @@ from quota_ring.forecast import (
     earliest_shortfall,
     forecast_status,
     format_duration,
+    local_day_boundaries,
     normalize_points,
 )
 from quota_ring.history import HistoryStore
@@ -364,7 +365,8 @@ class _DetailPane(Gtk.Box):
         self.chart.set_forecast(forecast, observations)
         legend = (
             "The dashed diagonal is spending exactly in step with the window. "
-            "Staying above it means the allowance runs out before the reset."
+            "Staying above it means the allowance runs out before the reset. "
+            "Faint vertical lines mark local midnights."
         )
         if len(observations) < 2:
             # Say so rather than let an inferred straight line pass for a
@@ -372,7 +374,8 @@ class _DetailPane(Gtk.Box):
             legend = (
                 "Nothing recorded for this window yet, so the line is the "
                 "average rate the projection assumes, not observed spend. "
-                "It fills in as the indicator runs."
+                "It fills in as the indicator runs. "
+                "Faint vertical lines mark local midnights."
             )
         self.chart_caption.set_markup(
             f"<span size='small' alpha='60%'>{_escape(legend)}</span>"
@@ -498,6 +501,8 @@ class _BurnUpChart(Gtk.DrawingArea):
             )
             return False
 
+        self._draw_day_boundaries(cr, forecast, px, py, fg)
+
         # The on-pace reference: spending the whole allowance exactly as the
         # window elapses. Everything above this line is running hot.
         cr.set_source_rgba(fg[0], fg[1], fg[2], 0.45)
@@ -524,6 +529,42 @@ class _BurnUpChart(Gtk.DrawingArea):
             cr, forecast, px, py, left, top, plot_width, plot_height, fg
         )
         return False
+
+    def _draw_day_boundaries(self, cr, forecast, px, py, fg) -> None:
+        boundaries = local_day_boundaries(forecast.start, forecast.reset)
+        if not boundaries:
+            return
+
+        dated = (forecast.window.duration_minutes or 0) >= 24 * 60
+        start_label = _clock(forecast.start, dated)
+        reset_label = f"resets {_clock(forecast.reset, dated)}"
+        start_end = px(0) + cr.text_extents(start_label).width + 10
+        reset_start = px(1) - cr.text_extents(reset_label).width - 10
+        now_x = (
+            px(forecast.elapsed_fraction)
+            if forecast.elapsed_fraction is not None
+            else None
+        )
+        now_width = cr.text_extents("now").width
+        baseline = py(0) + 16
+
+        for fraction, midnight in boundaries:
+            x = px(fraction)
+            cr.set_source_rgba(fg[0], fg[1], fg[2], 0.14)
+            cr.set_line_width(1)
+            cr.move_to(x, py(0))
+            cr.line_to(x, py(1))
+            cr.stroke()
+
+            label = midnight.strftime("%a")
+            width = cr.text_extents(label).width
+            if x - width / 2 <= start_end or x + width / 2 >= reset_start:
+                continue
+            if now_x is not None and abs(x - now_x) <= (width + now_width) / 2 + 10:
+                continue
+            cr.set_source_rgba(fg[0], fg[1], fg[2], 0.45)
+            cr.move_to(x - width / 2, baseline)
+            cr.show_text(label)
 
     def _draw_curve(self, cr, forecast, px, py, color, fraction, used) -> None:
         observed = [point for point in self.points if point[0] <= fraction + 1e-9]

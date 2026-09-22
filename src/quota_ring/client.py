@@ -207,7 +207,7 @@ class ClaudeClient:
             raise RuntimeError("Not logged in")
         output = _query_tui(
             command,
-            ready=lambda text: "shortcuts" in text.lower(),
+            ready=_claude_ready,
             complete=lambda text: "Failed to load usage data" in text,
             timeout=max(30, self.config.request_timeout_seconds),
             cwd=_claude_trusted_cwd(),
@@ -399,6 +399,14 @@ def _claude_sample(text: str) -> tuple[tuple[str, int], ...]:
     return tuple(
         (window.name, window.used_percent) for window in _parse_claude_usage(text)
     )
+
+
+def _claude_ready(text: str) -> bool:
+    """Whether Claude has rendered an interactive input prompt."""
+    cleaned = _clean_terminal(text)
+    if "shortcuts" in cleaned.lower():
+        return True
+    return any(line.lstrip().startswith("❯") for line in cleaned.splitlines())
 
 
 def _claude_reset_text(line: str) -> str | None:
