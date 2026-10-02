@@ -14,25 +14,34 @@ TRACK_COLOR = "#757575"
 TRACK_OPACITY = 0.25
 STATE_COLORS = {
     "green": "#43a047",
+    "blue": "#42a5f5",
+    "white": "#f5f5f5",
     "yellow": "#fdd835",
     "orange": "#fb8c00",
     "red": "#ef3e32",
     "unknown": TRACK_COLOR,
 }
 PULSE_LIGHT_COLOR = "#ffc9b8"
+WHITE_OUTLINE_COLOR = "#424242"
 
 
 def rings_svg(
-    states: tuple[int | None, int | None, int | None], pulse_light: bool = False
+    states: tuple[int | None, int | None, int | None],
+    colors: tuple[str, str, str] | None = None,
+    pulse_light: bool = False,
 ) -> str:
     """Render three concentric gauge rings (outer, middle, inner) as an SVG.
 
     Each state is a remaining percentage, or None for a disabled/unavailable
-    provider, which leaves only the faint track. ``pulse_light`` renders
-    critical rings (<= 2%) in a pale shade for the pulse animation.
+    provider, which leaves only the faint track. Colors can independently
+    represent forecast health. ``pulse_light`` renders critical rings (<= 2%)
+    in a pale shade for the pulse animation.
     """
     elements = []
-    for remaining, radius in zip(states, RING_RADII, strict=True):
+    selected_colors = colors or tuple(icon_state(value) for value in states)
+    for remaining, state, radius in zip(
+        states, selected_colors, RING_RADII, strict=True
+    ):
         elements.append(
             f'<circle cx="{CENTER_X}" cy="{CENTER_Y}" r="{radius}" fill="none" '
             f'stroke="{TRACK_COLOR}" stroke-opacity="{TRACK_OPACITY}" '
@@ -40,14 +49,21 @@ def rings_svg(
         )
         if remaining is None:
             continue
-        state = icon_state(remaining)
         if pulse_light and remaining <= 2:
             color = PULSE_LIGHT_COLOR
         else:
-            color = STATE_COLORS[state]
+            color = STATE_COLORS.get(state, TRACK_COLOR)
         circumference = 2 * math.pi * radius
         fraction = max(0, min(100, remaining)) / 100
         arc = fraction * circumference
+        if state == "white" and not (pulse_light and remaining <= 2):
+            elements.append(
+                f'<circle cx="{CENTER_X}" cy="{CENTER_Y}" r="{radius}" '
+                f'fill="none" stroke="{WHITE_OUTLINE_COLOR}" '
+                f'stroke-width="{STROKE_WIDTH + 1}" stroke-linecap="round" '
+                f'stroke-dasharray="{arc:.2f} {circumference:.2f}" '
+                f'transform="rotate(-90 {CENTER_X} {CENTER_Y})"/>'
+            )
         elements.append(
             f'<circle cx="{CENTER_X}" cy="{CENTER_Y}" r="{radius}" fill="none" '
             f'stroke="{color}" stroke-width="{STROKE_WIDTH}" '

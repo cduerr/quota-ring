@@ -9,6 +9,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 - Codex, Kimi, and Claude Code usage monitoring through existing local logins.
 - A color-coded top-bar indicator with critical percentage and pulse states.
+- Forecast-based ring and Insights chart colors, with white and blue for large
+  projected reserves.
 - Provider details, reset times, manual refresh, and persistent settings.
 - Adaptive polling below 5% remaining.
 - User-level installation, desktop autostart, and uninstall scripts.
@@ -23,6 +25,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Cap the forecast settling period at 15 minutes and show ring colors with
+  early estimates, avoiding hours of gray after a weekly reset.
+- Give GPT-6 Sol, GPT-6.1 Sol, and GPT-6 Luna distinct Insights colors instead
+  of relying on fallback colors that can collide with other models.
 - Include current usage from resumed Codex threads whose rollout files remain
   under an older creation-date directory.
 

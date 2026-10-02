@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 _TIMESTAMP = re.compile(br'^\{"timestamp":"([^"]+)"')
 _TURN_CONTEXT = b'"type":"turn_context"'
 

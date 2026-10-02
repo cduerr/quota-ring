@@ -13,11 +13,13 @@ from quota_ring.forecast import (
     UNDER,
     UNKNOWN,
     earliest_shortfall,
+    forecast_color,
     forecast_status,
     forecast_window,
     format_duration,
     local_day_boundaries,
     normalize_points,
+    worst_forecast_color,
 )
 from quota_ring.models import DashboardStatus, ProviderStatus, UsageWindow
 
@@ -84,6 +86,34 @@ class PaceTests(unittest.TestCase):
         self.assertEqual(result.state, IDLE)
         self.assertIsNone(result.exhaustion)
 
+    def test_weekly_estimate_and_color_start_after_fifteen_minutes(self):
+        before = forecast(1, timedelta(days=7) - timedelta(minutes=14))
+        self.assertIsNone(before.pace)
+        self.assertEqual(forecast_color(before), "unknown")
+        result = forecast(1, timedelta(days=7) - timedelta(minutes=15))
+        self.assertEqual(result.state, OVER)
+        self.assertIsNotNone(result.exhaustion)
+        self.assertEqual(forecast_color(result), "red")
+        self.assertFalse(result.confident)
+
+    def test_five_hour_estimate_has_color_before_full_confidence(self):
+        result = forecast(1, timedelta(hours=5) - timedelta(minutes=15), 300)
+        self.assertAlmostEqual(result.pace, 0.2)
+        self.assertEqual(forecast_color(result), "white")
+        self.assertFalse(result.confident)
+
+    def test_short_windows_keep_the_proportional_settling_period(self):
+        before = forecast(1, timedelta(minutes=58), 60)
+        result = forecast(1, timedelta(minutes=57), 60)
+        self.assertIsNone(before.pace)
+        self.assertAlmostEqual(result.pace, 0.2)
+
+    def test_reset_or_future_window_does_not_estimate_pace(self):
+        for remaining in (timedelta(days=7), timedelta(days=7, minutes=5)):
+            result = forecast(1, remaining)
+            self.assertIsNone(result.pace)
+            self.assertEqual(forecast_color(result), "unknown")
+
     def test_spent_window_is_already_out(self):
         result = forecast(100, timedelta(days=3.5))
         self.assertEqual(result.state, SPENT)
@@ -104,6 +134,32 @@ class PaceTests(unittest.TestCase):
             self.assertEqual(result.state, UNKNOWN)
             self.assertIsNone(result.pace)
             self.assertEqual(result.headline, "No reset time reported")
+
+    def test_ring_color_uses_projected_headroom(self):
+        self.assertEqual(forecast_color(forecast(25, timedelta(days=3.5))), "white")
+        self.assertEqual(forecast_color(forecast(30, timedelta(days=3.5))), "blue")
+        self.assertEqual(forecast_color(forecast(40, timedelta(days=3.5))), "green")
+        self.assertEqual(forecast_color(forecast(50, timedelta(days=3.5))), "green")
+        self.assertEqual(forecast_color(forecast(52, timedelta(days=3.5))), "yellow")
+        self.assertEqual(forecast_color(forecast(60, timedelta(days=3.5))), "orange")
+        self.assertEqual(forecast_color(forecast(63, timedelta(days=3.5))), "red")
+        self.assertEqual(forecast_color(forecast(100, timedelta(days=3.5))), "red")
+
+    def test_early_forecast_stays_neutral(self):
+        result = forecast(1, timedelta(days=7) - timedelta(minutes=2))
+        self.assertEqual(forecast_color(result), "unknown")
+
+    def test_on_budget_near_reset_stays_green(self):
+        result = forecast(99, timedelta(minutes=3), duration_minutes=300)
+        self.assertEqual(result.projected_used_at_reset, 100)
+        self.assertEqual(forecast_color(result), "green")
+
+    def test_provider_uses_worst_known_window_color(self):
+        forecasts = [
+            forecast(25, timedelta(days=3.5)),
+            forecast(60, timedelta(days=3.5), name="5-hour"),
+        ]
+        self.assertEqual(worst_forecast_color(forecasts), "orange")
 
 
 class EarliestShortfallTests(unittest.TestCase):

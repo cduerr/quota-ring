@@ -11,13 +11,17 @@ Kimi, and Claude Code through their existing local CLI logins.
 
 The indicator shows three concentric gauge rings — one per provider (Codex,
 Kimi, and Claude Code). Each ring fills with the remaining percentage of the
-provider's most constrained active window and shifts color as allowance drops:
+provider's most constrained active window. Its color shows the worst forecast
+among that provider's windows:
 
-- Green above 40% remaining
-- Yellow at 26–40%
-- Orange at 16–25%
-- Red at 3–15%
-- A slow red-to-pale pulse at 0–2%
+- White when projected to finish with at least 50% left
+- Blue at 25–49% projected left
+- Green at 0–24% projected left
+- Yellow when projected to spend 1–9% over budget
+- Orange when projected to spend 10–24% over budget
+- Red when spent or projected to spend at least 25% over budget
+- Gray while the forecast is unavailable or the window is still settling
+- A slow red-to-pale pulse at 0–2% actually remaining
 
 A disabled or unavailable provider keeps a faint empty ring. Open Settings to
 assign providers to the outer, middle, and inner rings with the arrow buttons
@@ -41,6 +45,11 @@ The chart plots spend against elapsed time. The dashed diagonal is spending
 perfectly in step with the window, and a curve above it is on course to run
 dry early — the projection marks where. Percentages are whole numbers, so
 spending is a step function and is drawn as one rather than smoothed.
+
+Pace estimates and ring colors begin after 5% of the window has elapsed, capped
+at 15 minutes. Insights labels estimates as early until 15% of the window has
+elapsed; initial bursts and whole-percent readings can make those projections
+change sharply after a reset.
 
 The headline names the window that runs out *soonest*, which is not always the
 one with the least left: a session window burning hard can empty long before a

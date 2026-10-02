@@ -25,6 +25,7 @@ from quota_ring.forecast import (
     UNKNOWN,
     Forecast,
     earliest_shortfall,
+    forecast_color,
     forecast_status,
     format_duration,
     local_day_boundaries,
@@ -32,7 +33,7 @@ from quota_ring.forecast import (
 )
 from quota_ring.history import HistoryStore
 from quota_ring.icons import STATE_COLORS
-from quota_ring.models import DashboardStatus, icon_state, reset_description
+from quota_ring.models import DashboardStatus, reset_description
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Pango", "1.0")
@@ -42,6 +43,9 @@ CHART_PADDING = (52, 16, 16, 34)  # left, right, top, bottom
 GRID_STEPS = (0, 25, 50, 75, 100)
 MODEL_COLORS = {
     "gpt-6-astra": "#8b5cf6",
+    "gpt-6-sol": "#14b8a6",
+    "gpt-6.1-sol": "#f97316",
+    "gpt-6-luna": "#6366f1",
     "gpt-5.6-sol": "#38bdf8",
     "gpt-5.6-terra": "#22c55e",
     "gpt-5.6-luna": "#f59e0b",
@@ -307,7 +311,7 @@ class _PaceBar(Gtk.DrawingArea):
         _rounded_rect(cr, 0, top, width, height, height / 2)
         cr.fill()
 
-        state = icon_state(self.forecast.window.remaining_percent)
+        state = forecast_color(self.forecast)
         cr.set_source_rgb(*_rgb(STATE_COLORS[state]))
         _rounded_rect(cr, 0, top, max(height, width * used), height, height / 2)
         cr.fill()
@@ -587,7 +591,7 @@ class _BurnUpChart(Gtk.DrawingArea):
 
         fraction = forecast.elapsed_fraction or 0.0
         used = forecast.window.used_percent / 100
-        state = icon_state(forecast.window.remaining_percent)
+        state = forecast_color(forecast)
         color = _rgb(STATE_COLORS[state])
 
         if self.stack_points and self.attribution is not None:
@@ -738,7 +742,7 @@ class _BurnUpChart(Gtk.DrawingArea):
         cr.set_dash([])
         if forecast.state != OVER or 1 / pace > 1:
             return
-        cr.set_source_rgb(*_rgb(STATE_COLORS["red"]))
+        cr.set_source_rgb(*color)
         cr.arc(px(end_x), py(1), 4.5, 0, 2 * math.pi)
         cr.fill()
         # Near the reset the marker sits against the right edge, so the label
@@ -842,7 +846,9 @@ class _HistoryStrip(Gtk.DrawingArea):
             cr.set_source_rgba(fg[0], fg[1], fg[2], 0.10)
             _rounded_rect(cr, x, top, bar_width, plot_height, 3)
             cr.fill()
-            cr.set_source_rgb(*_rgb(STATE_COLORS[icon_state(100 - peak)]))
+            # Completed windows have no live projection, so their height
+            # carries the utilization while color stays deliberately neutral.
+            cr.set_source_rgba(fg[0], fg[1], fg[2], 0.55)
             _rounded_rect(
                 cr, x, bottom - bar_height, bar_width, bar_height, 3
             )

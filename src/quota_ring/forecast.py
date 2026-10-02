@@ -18,8 +18,10 @@ from quota_ring.models import DashboardStatus, UsageWindow
 
 # Pace divides spend by elapsed time, so it says nothing while the denominator
 # is still tiny: one percent burned two minutes into a weekly window reads as a
-# 500x overrun. Stay quiet below this much of the window.
+# 500x overrun. Keep a short settling period, capped so weekly windows do not
+# suppress estimates for hours after a reset.
 MIN_ELAPSED_FRACTION = 0.05
+MAX_SETTLING_TIME = timedelta(minutes=15)
 # Past this much elapsed, the estimate is steady enough to show plainly.
 CONFIDENT_ELAPSED_FRACTION = 0.15
 # Treat pace this close to 1.0 as "on pace", so the verdict does not flap
@@ -33,6 +35,16 @@ UNDER = "under"
 ON = "on"
 OVER = "over"
 SPENT = "spent"
+
+FORECAST_COLOR_PRIORITY = {
+    "unknown": 0,
+    "white": 1,
+    "blue": 2,
+    "green": 3,
+    "yellow": 4,
+    "orange": 5,
+    "red": 6,
+}
 
 
 @dataclass(frozen=True)
@@ -146,7 +158,10 @@ def forecast_window(
     if window.used_percent >= 100:
         # Already gone; the reset is the only thing left to wait for.
         return replace(base, exhaustion=current)
-    if fraction < MIN_ELAPSED_FRACTION:
+    settling_seconds = min(
+        total * MIN_ELAPSED_FRACTION, MAX_SETTLING_TIME.total_seconds()
+    )
+    if elapsed < settling_seconds or fraction <= 0:
         return base
 
     pace = (window.used_percent / 100) / fraction
@@ -168,6 +183,35 @@ def forecast_status(
         if provider.available
         for window in provider.windows
     ]
+
+
+def forecast_color(forecast: Forecast) -> str:
+    """Map projected headroom to the ring's health color."""
+    if forecast.state == SPENT:
+        return "red"
+    if forecast.projected_used_at_reset is None:
+        return "unknown"
+    projected_left = 100 - forecast.projected_used_at_reset
+    if projected_left >= 50:
+        return "white"
+    if projected_left >= 25:
+        return "blue"
+    if projected_left >= 0:
+        return "green"
+    if projected_left >= -9:
+        return "yellow"
+    if projected_left >= -24:
+        return "orange"
+    return "red"
+
+
+def worst_forecast_color(forecasts: list[Forecast]) -> str:
+    """Return the most urgent known color among a provider's windows."""
+    colors = [forecast_color(item) for item in forecasts]
+    known = [color for color in colors if color != "unknown"]
+    if not known:
+        return "unknown"
+    return max(known, key=FORECAST_COLOR_PRIORITY.__getitem__)
 
 
 def earliest_shortfall(forecasts: list[Forecast]) -> Forecast | None:

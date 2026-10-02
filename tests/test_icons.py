@@ -28,6 +28,17 @@ class RingsSvgTests(unittest.TestCase):
         self.assertEqual(svg.count("<circle"), 3)
         self.assertNotIn("dasharray", svg)
 
+    def test_forecast_colors_are_independent_of_arc_length(self):
+        svg = rings_svg((80, 30, 10), ("yellow", "blue", "green"))
+        self.assertIn("#fdd835", svg)
+        self.assertIn("#42a5f5", svg)
+        self.assertIn("#43a047", svg)
+
+    def test_white_forecast_ring_has_a_dark_outline(self):
+        svg = rings_svg((75, None, None), ("white", "unknown", "unknown"))
+        self.assertIn("#f5f5f5", svg)
+        self.assertIn("#424242", svg)
+
     def test_pulse_light_shades_only_critical_rings(self):
         svg = rings_svg((2, 50, 1), pulse_light=True)
         self.assertEqual(svg.count("#ffc9b8"), 2)

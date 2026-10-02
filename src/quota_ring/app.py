@@ -15,6 +15,7 @@ import gi
 from quota_ring import __version__
 from quota_ring.client import ClaudeClient, CodexClient, KimiClient
 from quota_ring.config import Config
+from quota_ring.forecast import forecast_status, worst_forecast_color
 from quota_ring.history import HistoryStore
 from quota_ring.icons import prune_icons, rings_svg, write_icon
 from quota_ring.insights import InsightsWindow
@@ -49,6 +50,7 @@ class QuotaRingIndicator:
         self._timer_id: int | None = None
         self._icon_timer_id: int | None = None
         self._pulse_states: tuple[int | None, ...] | None = None
+        self._pulse_colors: tuple[str, ...] | None = None
         self._icon_light_phase = False
         self._insights: InsightsWindow | None = None
         self.history = _open_history()
@@ -138,7 +140,11 @@ class QuotaRingIndicator:
             if remaining is not None
             else "LLM quota unavailable"
         )
-        self._set_rings_icon(self._ring_states(status), description)
+        self._set_rings_icon(
+            self._ring_states(status),
+            self._ring_colors(status, self._last_checked),
+            description,
+        )
         self.indicator.set_title(description)
         try:
             self.history.record(status, self._last_checked)
@@ -172,20 +178,42 @@ class QuotaRingIndicator:
             states.append(provider.remaining_percent if provider else None)
         return tuple(states)  # type: ignore[return-value]
 
-    def _set_rings_icon(self, states: tuple[int | None, ...], description: str) -> None:
+    def _ring_colors(
+        self, status: DashboardStatus, now: datetime
+    ) -> tuple[str, str, str]:
+        by_provider: dict[str, list] = {}
+        for item in forecast_status(status, now):
+            by_provider.setdefault(item.provider, []).append(item)
+        colors = [
+            worst_forecast_color(by_provider.get(key, []))
+            for key in self.config.ring_order
+        ]
+        return tuple(colors)  # type: ignore[return-value]
+
+    def _set_rings_icon(
+        self,
+        states: tuple[int | None, ...],
+        colors: tuple[str, ...],
+        description: str,
+    ) -> None:
         self._stop_icon_animation()
-        name = write_icon(rings_svg(states), self.icon_cache_dir)
+        name = write_icon(rings_svg(states, colors), self.icon_cache_dir)
         self.indicator.set_icon_full(name, description)
         if any(state is not None and state <= 2 for state in states):
             self._pulse_states = states
+            self._pulse_colors = colors
             self._icon_timer_id = GLib.timeout_add(1400, self._pulse_icon)
 
     def _pulse_icon(self) -> bool:
-        if self._pulse_states is None:
+        if self._pulse_states is None or self._pulse_colors is None:
             return False
         self._icon_light_phase = not self._icon_light_phase
         name = write_icon(
-            rings_svg(self._pulse_states, pulse_light=self._icon_light_phase),
+            rings_svg(
+                self._pulse_states,
+                self._pulse_colors,
+                pulse_light=self._icon_light_phase,
+            ),
             self.icon_cache_dir,
         )
         self.indicator.set_icon_full(name, "LLM usage critical")
@@ -196,6 +224,7 @@ class QuotaRingIndicator:
             GLib.source_remove(self._icon_timer_id)
             self._icon_timer_id = None
         self._pulse_states = None
+        self._pulse_colors = None
         self._icon_light_phase = False
 
     def _rebuild_menu(self) -> None:
