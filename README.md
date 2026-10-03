@@ -51,6 +51,20 @@ at 15 minutes. Insights labels estimates as early until 15% of the window has
 elapsed; initial bursts and whole-percent readings can make those projections
 change sharply after a reset.
 
+For Codex windows lasting at least a day, early estimates can allow for recurring
+quiet hours learned from local token activity over the last three weeks. Learning
+requires at least seven completed days with activity in six or more hours, and
+a quiet stretch of 4–10 hours seen on at least 80% of those days. Auto review
+activity is excluded. This describes local inactivity, rather than actual sleep
+or work on other devices.
+
+The adjustment applies only during the first 24 hours, when the sample contains
+more active hours than a typical full day. It ends once a full day is represented
+and falls back to the ordinary estimate when history is insufficient. Insights
+shows the learned local hours and how many days support them while it is applied.
+The estimate still uses the provider's reported reset time to derive the window
+start; an inaccurate reset timestamp can still skew it.
+
 The headline names the window that runs out *soonest*, which is not always the
 one with the least left: a session window burning hard can empty long before a
 weekly one sitting lower.

@@ -15,7 +15,7 @@ import gi
 from quota_ring import __version__
 from quota_ring.client import ClaudeClient, CodexClient, KimiClient
 from quota_ring.config import Config
-from quota_ring.forecast import forecast_status, worst_forecast_color
+from quota_ring.forecast import worst_forecast_color
 from quota_ring.history import HistoryStore
 from quota_ring.icons import prune_icons, rings_svg, write_icon
 from quota_ring.insights import InsightsWindow
@@ -182,7 +182,7 @@ class QuotaRingIndicator:
         self, status: DashboardStatus, now: datetime
     ) -> tuple[str, str, str]:
         by_provider: dict[str, list] = {}
-        for item in forecast_status(status, now):
+        for item in self.history.forecasts(status, now):
             by_provider.setdefault(item.provider, []).append(item)
         colors = [
             worst_forecast_color(by_provider.get(key, []))

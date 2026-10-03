@@ -26,7 +26,6 @@ from quota_ring.forecast import (
     Forecast,
     earliest_shortfall,
     forecast_color,
-    forecast_status,
     format_duration,
     local_day_boundaries,
     normalize_points,
@@ -134,14 +133,12 @@ class InsightsWindow(Gtk.Window):
         """Take a fresh reading from the indicator and redraw."""
         current = now or datetime.now().astimezone()
         self.refresh_button.set_sensitive(not refreshing)
-        self._forecasts = forecast_status(status, current) if status else []
+        self._forecasts = self.history.forecasts(status, current) if status else []
         self._set_headline(status, error)
         self._set_subtitle(last_checked, refreshing)
         self._rebuild_list()
 
-    def _set_headline(
-        self, status: DashboardStatus | None, error: str | None
-    ) -> None:
+    def _set_headline(self, status: DashboardStatus | None, error: str | None) -> None:
         if error and not status:
             self.headline.set_markup(
                 f"<span size='x-large' weight='bold'>{_escape(error)}</span>"
@@ -167,9 +164,9 @@ class InsightsWindow(Gtk.Window):
             else ""
         )
         when = (
-            risk.exhaustion.strftime("%a %-I:%M%p").replace("AM", "am").replace(
-                "PM", "pm"
-            )
+            risk.exhaustion.strftime("%a %-I:%M%p")
+            .replace("AM", "am")
+            .replace("PM", "pm")
             if risk.exhaustion
             else "soon"
         )
@@ -182,9 +179,7 @@ class InsightsWindow(Gtk.Window):
         )
 
     def _set_subtitle(self, last_checked: datetime | None, refreshing: bool) -> None:
-        checked = (
-            last_checked.strftime("%-I:%M:%S %p") if last_checked else "not yet"
-        )
+        checked = last_checked.strftime("%-I:%M:%S %p") if last_checked else "not yet"
         state = "refreshing…" if refreshing else f"last checked {checked}"
         self.subtitle.set_markup(
             f"<span alpha='65%'>Projections assume the current average rate "
@@ -376,6 +371,14 @@ class _DetailPane(Gtk.Box):
             # Barely into the window, so the rate has had little to average
             # over and a small burst still swings it a long way.
             verdict += "<span size='large' alpha='55%'> · early estimate</span>"
+        if forecast.quiet_hours is not None:
+            quiet = forecast.quiet_hours
+            end_hour = (quiet.start_hour + quiet.hours) % 24
+            verdict += (
+                "<span size='small' alpha='65%'> · adjusted for usual quiet "
+                f"hours {quiet.start_hour:02d}:00–{end_hour:02d}:00 "
+                f"(local, {quiet.days} days of history)</span>"
+            )
         self.verdict.set_markup(verdict)
         self._fill_stats(forecast)
 
@@ -407,6 +410,11 @@ class _DetailPane(Gtk.Box):
                 "average rate the projection assumes, not observed spend. "
                 "It fills in as the indicator runs. "
                 "Faint vertical lines mark local midnights."
+            )
+        if forecast.quiet_hours is not None:
+            legend += (
+                " The projection allows for your recurring quiet hours; "
+                "this adjustment ends once a full day is represented."
             )
         self.chart_caption.set_markup(
             f"<span size='small' alpha='60%'>{_escape(legend)}</span>"
@@ -547,9 +555,7 @@ class _BurnUpChart(Gtk.DrawingArea):
         plot_height = max(1, height - top - bottom)
         forecast = self.forecast
 
-        cr.select_font_face(
-            "Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL
-        )
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(11)
 
         def px(x: float) -> float:
@@ -728,19 +734,44 @@ class _BurnUpChart(Gtk.DrawingArea):
         if not pace or pace <= 0:
             return
         fraction = forecast.elapsed_fraction or 0.0
-        # In these coordinates the average rate is the ray y = pace * x through
-        # the origin, so extending it is the projection.
-        end_x = min(1.0, 1 / pace)
+        total = (forecast.reset - forecast.start).total_seconds()
+        end_x = (
+            min(1.0, (forecast.exhaustion - forecast.start).total_seconds() / total)
+            if forecast.exhaustion
+            else 1.0
+        )
         if end_x <= fraction:
             return
         cr.set_source_rgba(*color, 0.85)
         cr.set_line_width(2)
         cr.set_dash([5, 5])
-        cr.move_to(px(fraction), py(pace * fraction))
-        cr.line_to(px(end_x), py(pace * end_x))
+        used = forecast.window.used_percent / 100
+        cr.move_to(px(fraction), py(used))
+        if forecast.quiet_hours is not None:
+            quiet = forecast.quiet_hours
+            work_elapsed = quiet.work_seconds(forecast.start, forecast.now)
+            # Sample each local hour so the projection flattens overnight.
+            stamp = forecast.now.timestamp()
+            stop = forecast.start.timestamp() + end_x * total
+            while stamp < stop:
+                local = datetime.fromtimestamp(stamp).astimezone()
+                stamp = min(
+                    stop,
+                    stamp
+                    + 3600
+                    - local.minute * 60
+                    - local.second
+                    - local.microsecond / 1_000_000,
+                )
+                at = datetime.fromtimestamp(stamp, forecast.now.tzinfo)
+                projected = used * quiet.work_seconds(forecast.start, at) / work_elapsed
+                x = (stamp - forecast.start.timestamp()) / total
+                cr.line_to(px(x), py(projected))
+        else:
+            cr.line_to(px(end_x), py(pace * end_x))
         cr.stroke()
         cr.set_dash([])
-        if forecast.state != OVER or 1 / pace > 1:
+        if forecast.state != OVER or pace < 1:
             return
         cr.set_source_rgb(*color)
         cr.arc(px(end_x), py(1), 4.5, 0, 2 * math.pi)
@@ -813,9 +844,7 @@ class _HistoryStrip(Gtk.DrawingArea):
         width = widget.get_allocated_width()
         height = widget.get_allocated_height()
         fg = _foreground(widget)
-        cr.select_font_face(
-            "Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL
-        )
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(10)
         if not self.instances:
             _centered_text(
@@ -849,9 +878,7 @@ class _HistoryStrip(Gtk.DrawingArea):
             # Completed windows have no live projection, so their height
             # carries the utilization while color stays deliberately neutral.
             cr.set_source_rgba(fg[0], fg[1], fg[2], 0.55)
-            _rounded_rect(
-                cr, x, bottom - bar_height, bar_width, bar_height, 3
-            )
+            _rounded_rect(cr, x, bottom - bar_height, bar_width, bar_height, 3)
             cr.fill()
             cr.set_source_rgba(fg[0], fg[1], fg[2], 0.65)
             label = instance.first_seen.strftime("%-m/%-d")

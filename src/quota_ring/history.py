@@ -191,6 +191,21 @@ class HistoryStore:
         row = self._series_state(provider, window_name)
         return row["instance_key"] if row else None
 
+    def forecasts(self, status: DashboardStatus, now: datetime):
+        """Use the same learned activity pattern for rings and Insights."""
+        from quota_ring.activity import learn_quiet_hours
+        from quota_ring.forecast import forecast_status
+
+        cutoff = int((now - timedelta(days=22)).timestamp())
+        rows = self._connection.execute(
+            "SELECT DISTINCT observed_at FROM codex_token_usage "
+            "WHERE observed_at >= ? AND observed_at < ? "
+            "AND model != 'codex-auto-review' AND input_tokens + output_tokens > 0",
+            (cutoff, int(now.timestamp())),
+        )
+        activity = [datetime.fromtimestamp(row[0]).astimezone() for row in rows]
+        return forecast_status(status, now, learn_quiet_hours(activity, now))
+
     def last_seen(self, provider: str, window_name: str) -> datetime | None:
         row = self._series_state(provider, window_name)
         if row is None:

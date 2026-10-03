@@ -7,6 +7,9 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Learn recurring quiet hours from local Codex activity to improve estimates
+  made before the first full day after a reset, with the adjustment shown in
+  Insights and shared by ring colors and the projected chart.
 - Codex, Kimi, and Claude Code usage monitoring through existing local logins.
 - A color-coded top-bar indicator with critical percentage and pulse states.
 - Forecast-based ring and Insights chart colors, with white and blue for large

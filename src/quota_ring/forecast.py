@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 
+from quota_ring.activity import QuietHours
 from quota_ring.models import DashboardStatus, UsageWindow
 
 # Pace divides spend by elapsed time, so it says nothing while the denominator
@@ -60,6 +61,7 @@ class Forecast:
     elapsed_fraction: float | None = None
     pace: float | None = None
     exhaustion: datetime | None = None
+    quiet_hours: QuietHours | None = None
 
     @property
     def state(self) -> str:
@@ -133,6 +135,7 @@ def forecast_window(
     display_name: str,
     window: UsageWindow,
     now: datetime | None = None,
+    quiet_hours: QuietHours | None = None,
 ) -> Forecast:
     current = now or datetime.now().astimezone()
     start = window.window_start
@@ -165,20 +168,60 @@ def forecast_window(
         return base
 
     pace = (window.used_percent / 100) / fraction
+    if (
+        quiet_hours is not None
+        and total >= 24 * 3600
+        and 0 < elapsed < 24 * 3600
+        and window.used_percent > 0
+    ):
+        work_elapsed = quiet_hours.work_seconds(start, current)
+        work_total = quiet_hours.work_seconds(start, reset)
+        work_fraction = work_elapsed / work_total if work_total > 0 else 0
+        # Adjust only when the sample overrepresents active hours. Never make
+        # an estimate worse because the user happened to start while idle.
+        if work_fraction > fraction:
+            pace = (window.used_percent / 100) / work_fraction
+            base = replace(base, quiet_hours=quiet_hours)
     base = replace(base, pace=pace)
     if pace <= 0:
         return base
     # Spend grows at the average rate, so it reaches 100% after total/pace.
+    if base.quiet_hours is not None and pace >= 1:
+        # Locate the crossing on the learned activity curve, not in sleep.
+        target = work_elapsed / (window.used_percent / 100)
+        low, high = current.timestamp(), reset.timestamp()
+        for _ in range(30):
+            middle = (low + high) / 2
+            at = datetime.fromtimestamp(middle, current.tzinfo)
+            if quiet_hours.work_seconds(start, at) < target:
+                low = middle
+            else:
+                high = middle
+        return replace(base, exhaustion=datetime.fromtimestamp(high, current.tzinfo))
+    if base.quiet_hours is not None:
+        remaining_rate = (pace - window.used_percent / 100) / (total - elapsed)
+        exhaustion = current + timedelta(
+            seconds=(1 - window.used_percent / 100) / remaining_rate
+        )
+        return replace(base, exhaustion=exhaustion)
     return replace(base, exhaustion=start + timedelta(seconds=total / pace))
 
 
 def forecast_status(
-    status: DashboardStatus, now: datetime | None = None
+    status: DashboardStatus,
+    now: datetime | None = None,
+    quiet_hours: QuietHours | None = None,
 ) -> list[Forecast]:
     """A forecast for every window of every provider that reported one."""
     current = now or datetime.now().astimezone()
     return [
-        forecast_window(provider.provider, provider.display_name, window, current)
+        forecast_window(
+            provider.provider,
+            provider.display_name,
+            window,
+            current,
+            quiet_hours if provider.provider == "codex" else None,
+        )
         for provider in status.providers
         if provider.available
         for window in provider.windows
